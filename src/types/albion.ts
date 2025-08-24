@@ -106,7 +106,7 @@ export const zKillEvent = z.object({
         Name: z.string(),
         Type: z.string(),
         Quality: z.number().int().positive()
-      }).optional()
+      }).nullable().optional()
     }).optional()
   }),
   Victim: z.object({
@@ -125,7 +125,7 @@ export const zKillEvent = z.object({
         Name: z.string(),
         Type: z.string(),
         Quality: z.number().int().positive()
-      }).optional()
+      }).nullable().optional()
     }).optional()
   })
 });
