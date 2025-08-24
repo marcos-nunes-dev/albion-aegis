@@ -1,6 +1,6 @@
 #!/usr/bin/env tsx
 
-import { runBattleCrawl } from '../src/workers/battleCrawler/producer.js';
+// import { runBattleCrawl } from '../src/workers/battleCrawler/producer.js';
 import { getBattlesPage } from '../src/http/client.js';
 import { prisma } from '../src/db/prisma.js';
 import { killsFetchQueue } from '../src/queue/queues.js';

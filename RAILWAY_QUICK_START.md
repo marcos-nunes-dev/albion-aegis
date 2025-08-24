@@ -6,6 +6,8 @@
 - [ ] Railway account: https://railway.app
 - [ ] GitHub repository with your code
 - [ ] Railway CLI: `npm install -g @railway/cli`
+- [ ] Supabase PostgreSQL database (existing)
+- [ ] Supabase `DATABASE_URL` ready
 
 ### **Step 2: Create Railway Project**
 ```bash
@@ -16,18 +18,13 @@ railway login
 railway init --name albion-aegis
 ```
 
-### **Step 3: Add Infrastructure Services**
-
-#### **PostgreSQL Database**
+### **Step 3: Add Redis Database (Required)**
 1. Go to Railway Dashboard
-2. Click "New Service" → "Database" → "PostgreSQL"
-3. Name: `albion-postgres`
-4. Copy the `DATABASE_URL`
+2. Click "New Service" → "Database" → "Redis"
+3. Name: `albion-redis`
+4. Copy the `REDIS_URL`
 
-#### **Redis Database**
-1. Click "New Service" → "Database" → "Redis"
-2. Name: `albion-redis`
-3. Copy the `REDIS_URL`
+**Note:** We're using your existing Supabase PostgreSQL, so no need to create Railway PostgreSQL.
 
 ### **Step 4: Deploy Application Services**
 
@@ -59,8 +56,8 @@ Copy these to each service's environment variables:
 ```bash
 # Required
 NODE_ENV=production
-DATABASE_URL=<your-postgres-url>
-REDIS_URL=<your-redis-url>
+DATABASE_URL=<your-supabase-postgres-url>
+REDIS_URL=<your-railway-redis-url>
 API_BASE_URL=https://api-next.albionbb.com/us
 USER_AGENT=albion-analytics-bot/1.0 (contact: your@email.com)
 
@@ -99,9 +96,8 @@ PORT=8080
 - Test: `https://your-domain/metrics`
 
 #### **Verify Database**
-- Go to PostgreSQL service
-- Click "Query" tab
-- Run: `SELECT table_name FROM information_schema.tables WHERE table_schema = 'public';`
+- Go to your Supabase dashboard
+- Check "Table Editor"
 - Should see: `Battle`, `KillEvent`, `ServiceState`
 
 ### **Step 7: Monitor & Scale**
@@ -125,19 +121,20 @@ PORT=8080
 - Check build logs
 
 #### **Database Connection Errors**
-- Verify `DATABASE_URL` format
-- Check PostgreSQL service status
-- Ensure SSL is enabled
+- Verify Supabase `DATABASE_URL` format
+- Check Supabase service status
+- Ensure SSL is enabled in connection string
 
 #### **Redis Connection Errors**
-- Verify `REDIS_URL` format
-- Check Redis service status
+- Verify Railway `REDIS_URL` format
+- Check Railway Redis service status
 - Ensure authentication is correct
 
 ### **📞 Support**
 
 - **Railway Docs**: https://docs.railway.app/
 - **Railway Discord**: https://discord.gg/railway
+- **Supabase Docs**: https://supabase.com/docs
 - **Application Logs**: Check Railway dashboard
 
 ---
@@ -146,7 +143,7 @@ PORT=8080
 
 The application will automatically:
 - ✅ Fetch battles from Albion API
-- ✅ Store data in PostgreSQL
-- ✅ Process kill events via Redis queues
+- ✅ Store data in Supabase PostgreSQL
+- ✅ Process kill events via Railway Redis queues
 - ✅ Provide metrics and health checks
 - ✅ Handle rate limiting and errors gracefully

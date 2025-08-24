@@ -4,7 +4,7 @@ import { log } from '../src/log.js';
 import redis from '../src/queue/connection.js';
 import { PrismaClient } from '@prisma/client';
 import { getBattlesPage } from '../src/http/client.js';
-import { getWatermark } from '../src/services/watermark.js';
+// import { getWatermark } from '../src/services/watermark.js';
 
 const prisma = new PrismaClient();
 const logger = log.child({ component: 'deep-sweep-nightly' });

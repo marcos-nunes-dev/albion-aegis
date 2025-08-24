@@ -2,21 +2,27 @@ import pino from 'pino';
 import { config } from './lib/config.js';
 
 // Create Pino logger with pretty formatting in development
-export const log = pino({
+const loggerOptions: any = {
   level: config.NODE_ENV === 'development' ? 'debug' : 'info',
-  transport: config.NODE_ENV === 'development' ? {
+  base: {
+    env: config.NODE_ENV,
+  },
+  timestamp: pino.stdTimeFunctions.isoTime,
+};
+
+// Add transport only in development
+if (config.NODE_ENV === 'development') {
+  loggerOptions.transport = {
     target: 'pino-pretty',
     options: {
       colorize: true,
       translateTime: 'SYS:standard',
       ignore: 'pid,hostname',
     }
-  } : undefined,
-  base: {
-    env: config.NODE_ENV,
-  },
-  timestamp: pino.stdTimeFunctions.isoTime,
-});
+  };
+}
+
+export const log = pino(loggerOptions);
 
 // Export child loggers for different components
 export const createLogger = (component: string) => log.child({ component });

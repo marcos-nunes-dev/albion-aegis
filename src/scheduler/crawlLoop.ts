@@ -70,7 +70,7 @@ function sleep(ms: number): Promise<void> {
 /**
  * Start the crawl loop that runs battle crawler periodically
  */
-export function startCrawlLoop(): NodeJS.Timeout {
+export function startCrawlLoop(): ReturnType<typeof setInterval> {
   log.info('Starting crawl loop', { 
     intervalSeconds: config.CRAWL_INTERVAL_SEC,
     slowdownDurationSeconds: SLOWDOWN_DURATION_MS / 1000,
@@ -124,7 +124,7 @@ export function startCrawlLoop(): NodeJS.Timeout {
 /**
  * Stop the crawl loop
  */
-export function stopCrawlLoop(intervalId: NodeJS.Timeout): void {
+export function stopCrawlLoop(intervalId: ReturnType<typeof setInterval>): void {
   log.info('Stopping crawl loop');
   clearInterval(intervalId);
   log.info('Crawl loop stopped');
