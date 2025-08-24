@@ -33,21 +33,21 @@ railway init --name albion-aegis
 2. Select your repository
 3. Name: `albion-scheduler`
 4. Set environment variables (see below)
-5. Start command: `node dist/apps/scheduler.js`
+5. Start command: `/app/start.sh` (automatically handled by Dockerfile)
 
 #### **Kills Worker Service**
 1. Click "New Service" → "GitHub Repo"
 2. Select your repository
 3. Name: `albion-kills`
 4. Same environment variables as scheduler
-5. Start command: `node dist/apps/kills-worker.js`
+5. Start command: `/app/start.sh` (automatically handled by Dockerfile)
 
 #### **Metrics Service**
 1. Click "New Service" → "GitHub Repo"
 2. Select your repository
 3. Name: `albion-metrics`
 4. Same environment variables + `PORT=8080`
-5. Start command: `node dist/apps/metrics-http.js`
+5. Start command: `/app/start.sh` (automatically handled by Dockerfile)
 
 ### **Step 5: Environment Variables**
 
