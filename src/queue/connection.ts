@@ -6,8 +6,8 @@ const redis = new Redis(config.REDIS_URL, {
   maxRetriesPerRequest: 3,
   lazyConnect: true,
   keepAlive: 30000,
-  connectTimeout: 10000,
-  commandTimeout: 5000,
+  connectTimeout: 30000, // Increased from 10s to 30s
+  commandTimeout: 30000, // Increased from 5s to 30s
 });
 
 // Connection event handlers
