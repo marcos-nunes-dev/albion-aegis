@@ -32,7 +32,6 @@ Albion Aegis is designed to be:
 - **Exponential Backoff**: Automatic retry for 429/5xx errors with jitter
 - **Response Validation**: Zod schemas for all API responses
 - **Error Handling**: Custom error classes with proper error wrapping
-- **Request Tracking**: Monitors last 200 requests for rate limiting analysis
 
 **Supported Endpoints:**
 - `GET /battles` - Battle list with filtering and pagination
@@ -128,7 +127,7 @@ KillEvent {
 }
 ```
 
-## 🚀 Getting Started
+## 🚀 Quick Start
 
 ### Prerequisites
 - Node.js 20+
@@ -136,7 +135,7 @@ KillEvent {
 - PostgreSQL database (Supabase recommended)
 - Redis instance (Upstash, Redis Cloud, or self-hosted)
 
-### Installation
+### Local Development
 
 1. **Clone and Install**
 ```bash
@@ -149,21 +148,26 @@ npm install
 ```bash
 cp .env.example .env
 # Edit .env with your database, Redis, and API settings
+# See the .env.example file for all required variables
 ```
 
 3. **Database Setup**
 ```bash
 # Run migrations
 npx prisma migrate deploy
-
-# Generate Prisma client
 npx prisma generate
 ```
 
-4. **Build and Test**
+4. **Start Services**
 ```bash
-npm run build
-npm run start:scheduler
+# Option 1: Full Docker development
+npm run dev:scheduler    # Start scheduler with Redis
+npm run dev:kills        # Start kills worker with Redis
+
+# Option 2: Local development with Docker Redis
+npm run redis:up         # Start Redis only
+npm run start:scheduler  # Terminal 1
+npm run start:kills      # Terminal 2
 ```
 
 ### Docker Deployment
@@ -186,16 +190,19 @@ docker compose up metrics
 # Required
 DATABASE_URL=postgresql://user:pass@host:5432/db?sslmode=require
 REDIS_URL=rediss://:password@host:port
-
-# API Configuration
 API_BASE_URL=https://api-next.albionbb.com/us
 USER_AGENT=albion-analytics-bot/1.0 (contact: your@email.com)
-RATE_MAX_RPS=4
 
-# Scheduling
+# API Configuration
+RATE_MAX_RPS=4
 CRAWL_INTERVAL_SEC=45
 MAX_PAGES_PER_CRAWL=8
 SOFT_LOOKBACK_MIN=180
+
+# Worker Configuration
+KILLS_WORKER_CONCURRENCY=3
+DEBOUNCE_KILLS_MIN=10
+RECHECK_DONE_BATTLE_HOURS=2
 
 # Deep Sweep Configuration
 DEEP_SWEEP_HOURLY_PAGES=25
@@ -204,12 +211,54 @@ DEEP_SWEEP_HOURLY_SLEEP_MS=60000
 NIGHTLY_SWEEP_PAGES=50
 NIGHTLY_SWEEP_LOOKBACK_H=24
 NIGHTLY_SWEEP_SLEEP_MS=90000
-
-# Worker Configuration
-KILLS_WORKER_CONCURRENCY=3
-DEBOUNCE_KILLS_MIN=10
-RECHECK_DONE_BATTLE_HOURS=2
 ```
+
+## 🚀 Railway Deployment
+
+### Quick Setup (5 minutes)
+
+1. **Create Railway Project**
+   - Go to [Railway Dashboard](https://railway.app/dashboard)
+   - Click "New Project" → "Deploy from GitHub repo"
+   - Select your `albion-aegis` repository
+
+2. **Add Infrastructure Services**
+   - **PostgreSQL**: "New Service" → "Database" → "PostgreSQL" (name: `albion-postgres`)
+   - **Redis**: "New Service" → "Database" → "Redis" (name: `albion-redis`)
+
+3. **Deploy Application Services**
+   - **Scheduler**: "New Service" → "GitHub Repo" (name: `albion-scheduler`)
+   - **Kills Worker**: "New Service" → "GitHub Repo" (name: `albion-kills`)
+   - **Metrics**: "New Service" → "GitHub Repo" (name: `albion-metrics`)
+
+4. **Configure Environment Variables**
+   - Copy the environment variables from the Configuration section above
+   - Add `PORT=8080` for the metrics service
+   - Set start commands:
+     - Scheduler: `node dist/apps/scheduler.js`
+     - Kills: `node dist/apps/kills-worker.js`
+     - Metrics: `node dist/apps/metrics-http.js`
+
+### Railway Redis Authentication Fix
+
+If you get `NOAUTH Authentication required` errors:
+
+1. **Check Redis URL Format**
+   ```
+   rediss://:password@hostname:port
+   ```
+   - Use `rediss://` (double 's') for SSL
+   - Password goes after colon, before @
+   - No username needed
+
+2. **Common Issues**
+   - ❌ Wrong: `redis://hostname:port`
+   - ✅ Correct: `rediss://:password@hostname:port`
+
+3. **Verify in Railway Dashboard**
+   - Go to each service → "Variables" tab
+   - Check `REDIS_URL` format
+   - Redeploy services after fixing
 
 ## 📈 Usage Examples
 
@@ -248,50 +297,72 @@ const killEvents = await getKillsForBattle(battles[0].albionId);
 console.log(`Battle has ${killEvents.length} kill events`);
 ```
 
-### Error Handling
-```typescript
-import { AlbionAPIError, RateLimitError } from './src/http/client.js';
+## 🧪 Testing & Monitoring
 
-try {
-  const battles = await getBattlesPage(0, 10);
-} catch (error) {
-  if (error instanceof RateLimitError) {
-    console.log(`Rate limited, retry after ${error.retryAfter}ms`);
-  } else if (error instanceof AlbionAPIError) {
-    console.log(`API error: ${error.message}`);
-  }
-}
-```
-
-## 🧪 Testing
-
-### Type Validation
+### Health Checks
 ```bash
-npm run typecheck
-```
+# Test health endpoint
+curl http://localhost:8080/healthz
 
-### API Testing
-```bash
-# Test HTTP client with real API
-npm run crawl:once
+# Check metrics
+curl http://localhost:8080/metrics
 ```
 
 ### Database Testing
 ```bash
 # Test database connection
 npx prisma studio
+
+# Run migrations
+npx prisma migrate deploy
 ```
 
-### Metrics Testing
+### Railway Service Verification
+
+Each Railway service has its own domain:
+- **Scheduler**: `https://albion-scheduler-*.up.railway.app` (background service)
+- **Kills Worker**: `https://albion-kills-*.up.railway.app` (background service)
+- **Metrics**: `https://albion-metrics-*.up.railway.app` (health: `/healthz`, metrics: `/metrics`)
+
+## 🔍 Troubleshooting
+
+### Common Issues
+
+1. **Database Connection Errors**
+   - Verify `DATABASE_URL` format
+   - Check if PostgreSQL service is running
+   - Ensure SSL is enabled in connection string
+
+2. **Redis Connection Errors**
+   - Verify `REDIS_URL` format (use `rediss://` for SSL)
+   - Check if Redis service is running
+   - Ensure authentication is properly configured
+
+3. **Service Not Starting**
+   - Check environment variables
+   - Verify start commands
+   - Check logs for missing dependencies
+
+4. **Rate Limiting Issues**
+   - Check API response logs for 429 errors
+   - Verify `RATE_MAX_RPS` setting
+   - Monitor adaptive slowdown behavior
+
+### Development Tips
+
 ```bash
-# Start metrics server
-npm run start:metrics
+# Clean development environment
+npm run dev:down
+npm run redis:down
+docker volume rm albion-aegis_redis-data
 
-# Check metrics endpoint
-curl http://localhost:8080/metrics
+# Test with different configurations
+CRAWL_INTERVAL_SEC=10 npm run start:scheduler
+RATE_MAX_RPS=2 npm run start:scheduler
 
-# Check health endpoint
-curl http://localhost:8080/healthz
+# View logs
+docker compose logs -f scheduler
+docker compose logs -f kills
 ```
 
 ## 📋 Development Status
@@ -324,68 +395,6 @@ curl http://localhost:8080/healthz
 - [ ] **Discord Bot**: Real-time battle notifications
 - [ ] **Dashboard**: Web interface for data exploration
 - [ ] **Advanced Metrics**: Custom dashboards and alerting
-
-## 🔍 API Coverage
-
-The service currently supports all major Albion Online API endpoints:
-
-1. **Battle List** (`/battles`)
-   - Pagination and filtering
-   - Battle summaries with alliance/guild data
-   - Rate-limited and validated
-
-2. **Battle Details** (`/battles/{id}`)
-   - Player statistics and performance
-   - Equipment and item power data
-   - Kill/death fame tracking
-
-3. **Kill Events** (`/battles/kills?ids={id}`)
-   - Individual kill event details
-   - Killer/victim information
-   - Equipment and item power data
-   - Timestamp and fame values
-
-## 🚀 Deployment
-
-### Production Deployment
-
-1. **Environment Setup**
-```bash
-# Copy production environment template
-cp .env.docker.example .env
-
-# Fill in your production credentials
-# - DATABASE_URL (Supabase/Neon/self-hosted PostgreSQL)
-# - REDIS_URL (Upstash/Redis Cloud/self-hosted Redis)
-# - API_BASE_URL and USER_AGENT
-```
-
-2. **Docker Deployment**
-```bash
-# Build and start all services
-docker compose up --build -d
-
-# Check service status
-docker compose ps
-
-# View logs
-docker compose logs -f scheduler
-docker compose logs -f kills
-docker compose logs -f metrics
-```
-
-3. **Database Migration**
-```bash
-# Run migrations on production database
-docker run --rm --env-file .env albion-ingestor:latest npx prisma migrate deploy
-```
-
-### Monitoring
-
-- **Metrics**: `http://localhost:8080/metrics`
-- **Health Check**: `http://localhost:8080/healthz`
-- **Logs**: Structured JSON logs with component tracking
-- **Queue Status**: BullMQ dashboard (optional)
 
 ## 🤝 Contributing
 

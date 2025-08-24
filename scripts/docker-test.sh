@@ -19,7 +19,7 @@ echo "✅ Docker is running"
 # Check if .env file exists
 if [ ! -f .env ]; then
     echo "⚠️  .env file not found. Creating from template..."
-    cp .env.docker.example .env
+    cp .env.example .env
     echo "📝 Please edit .env file with your real credentials before continuing"
     echo "   Required: DATABASE_URL and REDIS_URL"
     exit 1
@@ -43,4 +43,4 @@ echo ""
 echo "🚀 Ready to run with docker-compose!"
 echo "   Run: docker compose up --build"
 echo ""
-echo "📖 See DOCKER.md for detailed instructions"
+echo "📖 See README.md for detailed instructions"
