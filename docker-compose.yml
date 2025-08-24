@@ -1,0 +1,85 @@
+x-env: &common-env
+  NODE_ENV: production
+  API_BASE_URL: ${API_BASE_URL:-https://api-next.albionbb.com/us}
+  USER_AGENT: ${USER_AGENT:-albion-analytics-bot/1.0}
+  DATABASE_URL: ${DATABASE_URL}
+  REDIS_URL: ${REDIS_URL} # <-- point this to YOUR Redis (Upstash, self-hosted, etc.)
+  RATE_MAX_RPS: ${RATE_MAX_RPS:-4}
+  CRAWL_INTERVAL_SEC: ${CRAWL_INTERVAL_SEC:-45}
+  MAX_PAGES_PER_CRAWL: ${MAX_PAGES_PER_CRAWL:-8}
+  SOFT_LOOKBACK_MIN: ${SOFT_LOOKBACK_MIN:-180}
+  DEEP_SWEEP_HOURLY_PAGES: ${DEEP_SWEEP_HOURLY_PAGES:-25}
+  DEEP_SWEEP_HOURLY_LOOKBACK_H: ${DEEP_SWEEP_HOURLY_LOOKBACK_H:-12}
+  DEEP_SWEEP_HOURLY_SLEEP_MS: ${DEEP_SWEEP_HOURLY_SLEEP_MS:-60000}
+  NIGHTLY_SWEEP_PAGES: ${NIGHTLY_SWEEP_PAGES:-50}
+  NIGHTLY_SWEEP_LOOKBACK_H: ${NIGHTLY_SWEEP_LOOKBACK_H:-24}
+  NIGHTLY_SWEEP_SLEEP_MS: ${NIGHTLY_SWEEP_SLEEP_MS:-90000}
+  KILLS_WORKER_CONCURRENCY: ${KILLS_WORKER_CONCURRENCY:-3}
+  DEBOUNCE_KILLS_MIN: ${DEBOUNCE_KILLS_MIN:-10}
+  RECHECK_DONE_BATTLE_HOURS: ${RECHECK_DONE_BATTLE_HOURS:-2}
+
+services:
+  # Scheduler (polls /battles and enqueues kill jobs)
+  scheduler:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: albion-ingestor:latest
+    container_name: albion-scheduler
+    environment:
+      <<: *common-env
+    command: ["node", "dist/apps/scheduler.js"]
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "node", "-e", "process.exit(0)"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+
+  # Kills worker (consumes jobs and calls /battles/kills)
+  kills:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: albion-ingestor:latest
+    container_name: albion-kills
+    environment:
+      <<: *common-env
+    command: ["node", "dist/apps/kills-worker.js"]
+    restart: unless-stopped
+    depends_on:
+      - scheduler
+
+  # Metrics/health HTTP (optional if you built this app)
+  metrics:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: albion-ingestor:latest
+    container_name: albion-metrics
+    environment:
+      <<: *common-env
+      PORT: 8080
+    command: ["node", "dist/apps/metrics-http.js"]
+    ports:
+      - "8080:8080"
+    restart: unless-stopped
+
+  # Redis for job queue and caching
+  redis:
+    image: redis:7-alpine
+    container_name: albion-redis
+    ports:
+      - "6379:6379"
+    command: ["redis-server", "--save", "", "--appendonly", "yes"]
+    volumes:
+      - redis-data:/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+volumes:
+  redis-data:

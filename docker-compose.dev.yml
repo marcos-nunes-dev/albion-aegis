@@ -1,0 +1,103 @@
+version: "3.9"
+
+x-env: &common-env
+  NODE_ENV: development
+  API_BASE_URL: ${API_BASE_URL:-https://api-next.albionbb.com/us}
+  USER_AGENT: "albion-analytics-bot/1.0 (contact: me@example.com)"
+  DATABASE_URL: ${DATABASE_URL}
+  REDIS_URL: redis://redis:6379
+  RATE_MAX_RPS: ${RATE_MAX_RPS:-4}
+  CRAWL_INTERVAL_SEC: ${CRAWL_INTERVAL_SEC:-45}
+  MAX_PAGES_PER_CRAWL: ${MAX_PAGES_PER_CRAWL:-8}
+  SOFT_LOOKBACK_MIN: ${SOFT_LOOKBACK_MIN:-180}
+  DEEP_SWEEP_HOURLY_PAGES: ${DEEP_SWEEP_HOURLY_PAGES:-25}
+  DEEP_SWEEP_HOURLY_LOOKBACK_H: ${DEEP_SWEEP_HOURLY_LOOKBACK_H:-12}
+  DEEP_SWEEP_HOURLY_SLEEP_MS: ${DEEP_SWEEP_HOURLY_SLEEP_MS:-60000}
+  NIGHTLY_SWEEP_PAGES: ${NIGHTLY_SWEEP_PAGES:-50}
+  NIGHTLY_SWEEP_LOOKBACK_H: ${NIGHTLY_SWEEP_LOOKBACK_H:-24}
+  NIGHTLY_SWEEP_SLEEP_MS: ${NIGHTLY_SWEEP_SLEEP_MS:-90000}
+  KILLS_WORKER_CONCURRENCY: ${KILLS_WORKER_CONCURRENCY:-3}
+  DEBOUNCE_KILLS_MIN: ${DEBOUNCE_KILLS_MIN:-10}
+  RECHECK_DONE_BATTLE_HOURS: ${RECHECK_DONE_BATTLE_HOURS:-2}
+
+services:
+  # Redis for development
+  redis:
+    image: redis:7-alpine
+    container_name: albion-redis-dev
+    ports:
+      - "6379:6379"
+    command: ["redis-server", "--save", "", "--appendonly", "yes"]
+    volumes:
+      - redis-data:/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  # Development scheduler (runs with tsx for hot reload)
+  scheduler-dev:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    container_name: albion-scheduler-dev
+    environment:
+      <<: *common-env
+    command: ["npm", "run", "start:scheduler"]
+    restart: unless-stopped
+    depends_on:
+      redis:
+        condition: service_healthy
+    volumes:
+      - .:/app
+      - /app/node_modules
+    healthcheck:
+      test: ["CMD", "node", "-e", "process.exit(0)"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+
+  # Development kills worker (runs with tsx for hot reload)
+  kills-dev:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    container_name: albion-kills-dev
+    environment:
+      <<: *common-env
+    command: ["npm", "run", "start:kills"]
+    restart: unless-stopped
+    depends_on:
+      redis:
+        condition: service_healthy
+      scheduler-dev:
+        condition: service_healthy
+    volumes:
+      - .:/app
+      - /app/node_modules
+    healthcheck:
+      test: ["CMD", "node", "-e", "process.exit(0)"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+
+  # Development single crawl (for testing)
+  crawl-once-dev:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    container_name: albion-crawl-once-dev
+    environment:
+      <<: *common-env
+    command: ["npm", "run", "crawl:once"]
+    depends_on:
+      redis:
+        condition: service_healthy
+    volumes:
+      - .:/app
+      - /app/node_modules
+
+volumes:
+  redis-data:

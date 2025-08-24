@@ -1,0 +1,65 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model ServiceState {
+  key       String  @id
+  value     String
+  updatedAt DateTime @updatedAt
+}
+
+model Battle {
+  albionId       BigInt   @id
+  startedAt      DateTime
+  totalFame      Int
+  totalKills     Int
+  totalPlayers   Int
+  alliancesJson  Json
+  guildsJson     Json
+  ingestedAt     DateTime @default(now())
+  killsFetchedAt DateTime?
+
+  @@index([startedAt])
+}
+
+model KillEvent {
+  EventId             BigInt   @id
+  TimeStamp           DateTime
+  TotalVictimKillFame Int
+  battleAlbionId      BigInt?
+
+  // Killer information
+  killerId            String   @db.VarChar(64)
+  killerName          String   @db.VarChar(48)
+  killerGuild         String?  @db.VarChar(64)
+  killerAlliance      String?  @db.VarChar(16)
+  killerAvgIP         Float
+
+  // Victim information
+  victimId            String   @db.VarChar(64)
+  victimName          String   @db.VarChar(48)
+  victimGuild         String?  @db.VarChar(64)
+  victimAlliance      String?  @db.VarChar(16)
+  victimAvgIP         Float
+
+  // Equipment (stored as JSON)
+  killerEquipment     Json?
+  victimEquipment     Json?
+  
+  ingestedAt          DateTime @default(now())
+
+  @@index([TimeStamp])
+  @@index([battleAlbionId])
+  @@index([killerAlliance])
+  @@index([victimAlliance])
+  @@index([killerId])
+  @@index([victimId])
+}

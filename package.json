@@ -1,0 +1,73 @@
+{
+  "name": "albion-aegis",
+  "version": "1.0.0",
+  "description": "A lightweight ingestion service for Albion Online battle data",
+  "main": "dist/src/index.js",
+  "type": "module",
+  "scripts": {
+    "dev": "tsx src/index.ts",
+    "build": "tsc",
+    "start": "node dist/src/index.js",
+    "start:scheduler": "tsx apps/scheduler.ts",
+    "start:kills": "tsx apps/kills-worker.ts",
+    "start:metrics": "tsx apps/metrics-http.ts",
+    "start:sweep-hourly": "tsx apps/deep-sweep-hourly.ts",
+    "start:sweep-nightly": "tsx apps/deep-sweep-nightly.ts",
+    "crawl:once": "tsx apps/dev-once.ts",
+    "backfill": "tsx apps/backfill.ts",
+    "railway:setup": "bash scripts/railway-setup.sh",
+    "railway:deploy": "railway up",
+    "railway:logs": "railway logs",
+    "dev:redis": "docker-compose -f docker-compose.dev.yml up redis -d",
+    "dev:scheduler": "docker-compose -f docker-compose.dev.yml up scheduler-dev",
+    "dev:kills": "docker-compose -f docker-compose.dev.yml up kills-dev",
+    "dev:crawl": "docker-compose -f docker-compose.dev.yml run --rm crawl-once-dev",
+    "dev:down": "docker-compose -f docker-compose.dev.yml down",
+    "redis:up": "docker-compose -f docker-compose.redis-only.yml up -d",
+    "redis:down": "docker-compose -f docker-compose.redis-only.yml down",
+    "redis:logs": "docker-compose -f docker-compose.redis-only.yml logs -f redis",
+    "dev:setup": "powershell -ExecutionPolicy Bypass -File scripts/dev-setup.ps1",
+    "dev:backfill": "tsx apps/backfill.ts",
+    "prisma:generate": "prisma generate",
+    "prisma:migrate": "prisma migrate dev",
+    "lint": "eslint src apps --ext .ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/marcos-nunes-dev/albion-aegis.git"
+  },
+  "keywords": [
+    "albion-online",
+    "battle-data",
+    "ingestion",
+    "analytics"
+  ],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/marcos-nunes-dev/albion-aegis/issues"
+  },
+  "homepage": "https://github.com/marcos-nunes-dev/albion-aegis#readme",
+  "dependencies": {
+    "@prisma/client": "^5.7.1",
+    "bottleneck": "^2.19.5",
+    "bullmq": "^4.15.0",
+    "dotenv": "^16.3.1",
+    "ioredis": "^5.3.2",
+    "pino": "^8.17.2",
+    "pino-pretty": "^13.1.1",
+    "prom-client": "^15.1.0",
+    "undici": "^5.28.2",
+    "zod": "^3.22.4"
+  },
+  "devDependencies": {
+    "@types/node": "^20.10.5",
+    "@typescript-eslint/eslint-plugin": "^6.15.0",
+    "@typescript-eslint/parser": "^6.15.0",
+    "eslint": "^8.56.0",
+    "prisma": "^5.7.1",
+    "tsx": "^4.6.2",
+    "typescript": "^5.3.3"
+  }
+}

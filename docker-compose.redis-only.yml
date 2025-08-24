@@ -1,0 +1,21 @@
+version: "3.9"
+
+services:
+  # Redis for local development
+  redis:
+    image: redis:7-alpine
+    container_name: albion-redis-local
+    ports:
+      - "6379:6379"
+    command: ["redis-server", "--save", "", "--appendonly", "yes"]
+    volumes:
+      - redis-data:/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+volumes:
+  redis-data:
