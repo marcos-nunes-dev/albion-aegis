@@ -1,7 +1,7 @@
 import Redis from 'ioredis';
 import { config } from '../lib/config.js';
 
-// Create Redis connection with basic configuration
+// Create Redis connection with Railway-compatible configuration
 const redis = new Redis(config.REDIS_URL, {
   maxRetriesPerRequest: 3,
   lazyConnect: true,

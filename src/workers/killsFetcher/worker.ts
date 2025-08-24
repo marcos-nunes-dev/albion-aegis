@@ -4,6 +4,7 @@ import { prisma } from '../../db/prisma.js';
 import { killsFetchQueue } from '../../queue/queues.js';
 import { config } from '../../lib/config.js';
 import type { KillEvent } from '../../types/albion.js';
+import redis from '../../queue/connection.js';
 
 /**
  * Kills fetcher worker - processes jobs from killsFetchQueue
@@ -70,6 +71,7 @@ export function createKillsFetcherWorker(): Worker {
       }
     },
     {
+      connection: redis,
       concurrency: config.KILLS_WORKER_CONCURRENCY,
       removeOnComplete: { count: 1000 },  // Keep last 1000 completed jobs
       removeOnFail: { count: 500 },       // Keep last 500 failed jobs
