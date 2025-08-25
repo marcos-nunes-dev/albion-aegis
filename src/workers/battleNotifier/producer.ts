@@ -20,7 +20,7 @@ export class BattleNotifierProducer {
   async enqueueBattleNotification(battleId: bigint): Promise<void> {
     try {
       const job = await this.queue.add('process-battle-notification', {
-        battleId
+        battleId: battleId.toString()
       }, {
         removeOnComplete: 100, // Keep last 100 completed jobs
         removeOnFail: 50,      // Keep last 50 failed jobs
@@ -54,7 +54,7 @@ export class BattleNotifierProducer {
     try {
       const jobs = battleIds.map(battleId => ({
         name: 'process-battle-notification',
-        data: { battleId },
+        data: { battleId: battleId.toString() },
         opts: {
           removeOnComplete: 100,
           removeOnFail: 50,

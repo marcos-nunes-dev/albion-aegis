@@ -9,7 +9,7 @@ import { getBattleDetail } from '../../http/client.js';
 const logger = log.child({ component: 'battle-notifier-worker' });
 
 export interface BattleNotificationJob {
-  battleId: bigint;
+  battleId: string;
 }
 
 export class BattleNotifierWorker {
@@ -24,20 +24,21 @@ export class BattleNotifierWorker {
    */
   async processJob(job: Job<BattleNotificationJob>): Promise<void> {
     const { battleId } = job.data;
+    const battleIdBigInt = BigInt(battleId);
     
     logger.info({
       message: 'Processing battle notification job',
-      battleId: battleId.toString(),
+      battleId: battleId,
       jobId: job.id
     });
 
     try {
       // Get battle details
-      const battleDetail = await getBattleDetail(battleId);
+      const battleDetail = await getBattleDetail(battleIdBigInt);
       if (!battleDetail) {
         logger.warn({
           message: 'Battle details not found',
-          battleId: battleId.toString()
+          battleId: battleId
         });
         return;
       }
@@ -48,7 +49,7 @@ export class BattleNotifierWorker {
       if (subscriptions.length === 0) {
         logger.debug({
           message: 'No active tracking subscriptions found',
-          battleId: battleId.toString()
+          battleId: battleId
         });
         return;
       }
@@ -62,7 +63,7 @@ export class BattleNotifierWorker {
 
       logger.info({
         message: 'Battle notification processing completed',
-        battleId: battleId.toString(),
+        battleId: battleId,
         subscriptionCount: subscriptions.length
       });
 
@@ -70,7 +71,7 @@ export class BattleNotifierWorker {
       logger.error({
         message: 'Failed to process battle notification job',
         error: error instanceof Error ? error.message : String(error),
-        battleId: battleId.toString(),
+        battleId: battleId,
         jobId: job.id
       });
       throw error;
