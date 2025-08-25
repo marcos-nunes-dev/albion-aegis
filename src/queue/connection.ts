@@ -3,7 +3,7 @@ import { config } from '../lib/config.js';
 
 // Create Redis connection with Railway-compatible configuration
 const redis = new Redis(config.REDIS_URL, {
-  maxRetriesPerRequest: 3,
+  maxRetriesPerRequest: null, // Fixed for BullMQ compatibility
   lazyConnect: true,
   keepAlive: 30000,
   connectTimeout: 30000, // Increased from 10s to 30s

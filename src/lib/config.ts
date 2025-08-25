@@ -39,6 +39,9 @@ const configSchema = z.object({
   KILLS_WORKER_CONCURRENCY: z.coerce.number().positive().default(3),
   DEBOUNCE_KILLS_MIN: z.coerce.number().positive().default(10),
   RECHECK_DONE_BATTLE_HOURS: z.coerce.number().positive().default(2),
+  
+  // Battle Notifier Configuration
+  BATTLE_NOTIFIER_CONCURRENCY: z.coerce.number().positive().default(2),
 });
 
 // Parse and validate the configuration
@@ -81,6 +84,7 @@ export const getConfigSummary = () => ({
   KILLS_WORKER_CONCURRENCY: config.KILLS_WORKER_CONCURRENCY,
   DEBOUNCE_KILLS_MIN: config.DEBOUNCE_KILLS_MIN,
   RECHECK_DONE_BATTLE_HOURS: config.RECHECK_DONE_BATTLE_HOURS,
+  BATTLE_NOTIFIER_CONCURRENCY: config.BATTLE_NOTIFIER_CONCURRENCY,
   DATABASE_URL: config.DATABASE_URL ? '[SET]' : '[NOT SET]',
   REDIS_URL: config.REDIS_URL ? '[SET]' : '[NOT SET]',
 });

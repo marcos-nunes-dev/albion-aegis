@@ -171,6 +171,83 @@ export const zRateLimitResponse = z.object({
   reset: z.number().optional()
 });
 
+// Tracking Subscription Schema
+export const zTrackingSubscription = z.object({
+  id: z.string().cuid(),
+  userId: z.string().max(64),
+  entityName: z.string().max(64),
+  entityType: z.enum(['GUILD', 'ALLIANCE']),
+  discordWebhook: z.string().url().startsWith('https://discord.com/api/webhooks/'),
+  minTotalFame: z.number().int().min(0).default(0),
+  minTotalKills: z.number().int().min(0).default(0),
+  minTotalPlayers: z.number().int().min(0).default(0),
+  isActive: z.boolean().default(true),
+  createdAt: z.date(),
+  updatedAt: z.date()
+});
+
+// Counter History Schema
+export const zCounterHistory = z.object({
+  id: z.string().cuid(),
+  subscriptionId: z.string().cuid(),
+  periodName: z.string().max(64),
+  startDate: z.date(),
+  endDate: z.date().nullable(),
+  totalWins: z.number().int().min(0).default(0),
+  totalLosses: z.number().int().min(0).default(0),
+  totalKills: z.number().int().min(0).default(0),
+  totalDeaths: z.number().int().min(0).default(0),
+  isActive: z.boolean().default(true),
+  createdAt: z.date(),
+  updatedAt: z.date()
+});
+
+// Battle Result Schema
+export const zBattleResult = z.object({
+  id: z.string().cuid(),
+  subscriptionId: z.string().cuid(),
+  counterHistoryId: z.string().cuid(),
+  battleAlbionId: z.bigint(),
+  isWin: z.boolean(),
+  kills: z.number().int().min(0).default(0),
+  deaths: z.number().int().min(0).default(0),
+  totalFame: z.number().int().min(0),
+  totalPlayers: z.number().int().min(0),
+  processedAt: z.date()
+});
+
+// Discord Webhook Payload Schema
+export const zDiscordWebhookPayload = z.object({
+  embeds: z.array(z.object({
+    title: z.string().optional(),
+    description: z.string().optional(),
+    url: z.string().url().optional(),
+    color: z.number().int().min(0).max(16777215).optional(),
+    fields: z.array(z.object({
+      name: z.string(),
+      value: z.string(),
+      inline: z.boolean().optional()
+    })).optional(),
+    footer: z.object({
+      text: z.string(),
+      icon_url: z.string().url().optional()
+    }).optional(),
+    timestamp: z.string().datetime().optional()
+  }))
+});
+
+// Guild/Alliance Battle Stats Schema
+export const zGuildBattleStats = z.object({
+  entityName: z.string(),
+  entityType: z.enum(['GUILD', 'ALLIANCE']),
+  totalFame: z.number().int().min(0),
+  totalKills: z.number().int().min(0),
+  totalPlayers: z.number().int().min(0),
+  kills: z.number().int().min(0),
+  deaths: z.number().int().min(0),
+  isWin: z.boolean()
+});
+
 // Inferred TypeScript Types
 export type BattleListItem = z.infer<typeof zBattleListItem>;
 export type BattleListResponse = z.infer<typeof zBattleListResponse>;
@@ -181,6 +258,11 @@ export type PlayerKillEvent = z.infer<typeof zPlayerKillEvent>;
 export type ServiceState = z.infer<typeof zServiceState>;
 export type ErrorResponse = z.infer<typeof zErrorResponse>;
 export type RateLimitResponse = z.infer<typeof zRateLimitResponse>;
+export type TrackingSubscription = z.infer<typeof zTrackingSubscription>;
+export type CounterHistory = z.infer<typeof zCounterHistory>;
+export type BattleResult = z.infer<typeof zBattleResult>;
+export type DiscordWebhookPayload = z.infer<typeof zDiscordWebhookPayload>;
+export type GuildBattleStats = z.infer<typeof zGuildBattleStats>;
 
 // Helper functions for parsing
 export const parseBattleList = (data: unknown): BattleListResponse => {

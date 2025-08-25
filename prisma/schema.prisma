@@ -63,3 +63,83 @@ model KillEvent {
   @@index([killerId])
   @@index([victimId])
 }
+
+// Tracking subscriptions for guild/alliance monitoring
+model TrackingSubscription {
+  id              String   @id @default(cuid())
+  userId          String   @db.VarChar(64) // User identifier (can be email, discord ID, etc.)
+  entityName      String   @db.VarChar(64) // Guild or Alliance name
+  entityType      EntityType
+  discordWebhook  String   @db.Text // Discord webhook URL
+  minTotalFame    Int      @default(0)
+  minTotalKills   Int      @default(0)
+  minTotalPlayers Int      @default(0)
+  isActive        Boolean  @default(true)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  // Counter history for this subscription
+  counterHistory  CounterHistory[]
+  
+  // Individual battle results
+  battleResults   BattleResult[]
+
+  @@index([entityName, entityType])
+  @@index([userId])
+  @@index([isActive])
+}
+
+// Counter history for tracking W/L - KD - Winrate over time
+model CounterHistory {
+  id                    String   @id @default(cuid())
+  subscriptionId        String
+  periodName            String   @db.VarChar(64) // e.g., "2024-01-01 to 2024-01-15"
+  startDate             DateTime
+  endDate               DateTime?
+  totalWins             Int      @default(0)
+  totalLosses           Int      @default(0)
+  totalKills            Int      @default(0)
+  totalDeaths           Int      @default(0)
+  isActive              Boolean  @default(true) // false when period is ended
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  // Reference to subscription
+  subscription          TrackingSubscription @relation(fields: [subscriptionId], references: [id], onDelete: Cascade)
+  
+  // Individual battle results for this counter period
+  battleResults         BattleResult[]
+
+  @@index([subscriptionId])
+  @@index([isActive])
+  @@index([startDate])
+}
+
+// Individual battle results for detailed tracking
+model BattleResult {
+  id                    String   @id @default(cuid())
+  subscriptionId        String
+  counterHistoryId      String
+  battleAlbionId        BigInt
+  isWin                 Boolean
+  kills                 Int      @default(0)
+  deaths                Int      @default(0)
+  totalFame             Int
+  totalPlayers          Int
+  processedAt           DateTime @default(now())
+
+  // References
+  subscription          TrackingSubscription @relation(fields: [subscriptionId], references: [id], onDelete: Cascade)
+  counterHistory        CounterHistory @relation(fields: [counterHistoryId], references: [id], onDelete: Cascade)
+
+  @@index([subscriptionId])
+  @@index([counterHistoryId])
+  @@index([battleAlbionId])
+  @@index([processedAt])
+}
+
+// Enum for entity type
+enum EntityType {
+  GUILD
+  ALLIANCE
+}

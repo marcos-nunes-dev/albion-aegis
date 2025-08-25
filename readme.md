@@ -204,6 +204,9 @@ KILLS_WORKER_CONCURRENCY=3
 DEBOUNCE_KILLS_MIN=10
 RECHECK_DONE_BATTLE_HOURS=2
 
+# Battle Notifier Configuration
+BATTLE_NOTIFIER_CONCURRENCY=2
+
 # Deep Sweep Configuration
 DEEP_SWEEP_HOURLY_PAGES=25
 DEEP_SWEEP_HOURLY_LOOKBACK_H=12
@@ -260,6 +263,90 @@ If you get `NOAUTH Authentication required` errors:
    - Check `REDIS_URL` format
    - Redeploy services after fixing
 
+## 🎯 Guild/Alliance Tracking Feature
+
+### Overview
+The tracking feature allows users to monitor specific guilds or alliances and receive real-time Discord notifications when battles meet their custom criteria. The system tracks W/L - KD - Winrate statistics and maintains historical periods.
+
+### Features
+- **Real-time Notifications**: Discord webhook notifications when battles meet criteria
+- **Custom Criteria**: Set minimum totalFame, totalKills, and totalPlayers thresholds
+- **Win/Loss Tracking**: Automatic determination based on kill/death analysis
+- **Counter System**: W/L - KD - Winrate tracking with historical periods
+- **CLI Management**: Command-line tools for managing subscriptions
+- **Scalable**: Multiple users can track the same guild without performance impact
+
+### Quick Start
+
+1. **Create a Discord Webhook**
+   - Go to your Discord server → Server Settings → Integrations → Webhooks
+   - Create a new webhook and copy the URL
+
+2. **Add a Tracking Subscription**
+   ```bash
+   npm run tracking:add user123 "My Guild" GUILD https://discord.com/api/webhooks/... 1000000 50 20
+   ```
+
+3. **Start the Battle Notifier Worker**
+   ```bash
+   npm run start:notifier
+   ```
+
+4. **Monitor Your Subscriptions**
+   ```bash
+   npm run tracking:list
+   ```
+
+### CLI Commands
+
+```bash
+# Add a new tracking subscription
+npm run tracking:add <userId> <entityName> <entityType> <webhookUrl> [minFame] [minKills] [minPlayers]
+
+# List all subscriptions
+npm run tracking:list
+
+# Reset counter for a subscription
+npm run tracking:reset <subscriptionId>
+
+# Test Discord webhook
+npm run tracking:test <subscriptionId>
+
+# Delete a subscription
+npm run tracking:delete <subscriptionId>
+```
+
+### Examples
+
+```bash
+# Track a guild with minimum 1M fame, 50 kills, 20 players
+npm run tracking:add user123 "My Guild" GUILD https://discord.com/api/webhooks/... 1000000 50 20
+
+# Track an alliance with minimum 500K fame, 25 kills, 15 players
+npm run tracking:add user456 "My Alliance" ALLIANCE https://discord.com/api/webhooks/... 500000 25 15
+
+# Track any battle (no minimum criteria)
+npm run tracking:add user789 "Any Battle" GUILD https://discord.com/api/webhooks/... 0 0 0
+```
+
+### Discord Notification Format
+
+When a battle meets your criteria, you'll receive a Discord embed with:
+- **Title**: Battle Alert with guild/alliance name
+- **Description**: WIN/LOSS result
+- **Fields**: Battle stats and entity performance
+- **Footer**: Current W/L - KD - Winrate statistics
+- **Link**: Direct link to AlbionBB battle details
+
+### Counter System
+
+The system maintains running statistics:
+- **W/L**: Wins and losses for the current period
+- **KD**: Total kills and deaths
+- **Winrate**: Percentage of wins
+
+You can reset counters to start new periods while preserving historical data.
+
 ## 📈 Usage Examples
 
 ### Available Scripts
@@ -268,11 +355,19 @@ If you get `NOAUTH Authentication required` errors:
 # Main services
 npm run start:scheduler      # Start the main battle crawler scheduler
 npm run start:kills          # Start the kills processing worker
+npm run start:notifier       # Start the battle notification worker
 npm run start:metrics        # Start the metrics HTTP server
 
 # Deep sweep services
 npm run start:sweep-hourly   # Run hourly deep sweep (12h lookback)
 npm run start:sweep-nightly  # Run nightly deep sweep (24h lookback)
+
+# Tracking management
+npm run tracking:add         # Add tracking subscription
+npm run tracking:list        # List all subscriptions
+npm run tracking:reset       # Reset counter
+npm run tracking:test        # Test webhook
+npm run tracking:delete      # Delete subscription
 
 # Development and testing
 npm run crawl:once          # Run a single battle crawl and exit
@@ -389,10 +484,15 @@ docker compose logs -f kills
 - [ ] **Production Monitoring**: Health checks and alerting
 - [ ] **Performance Optimization**: Query optimization and caching
 
+### ✅ Completed
+- [x] **Guild/Alliance Tracking**: Real-time Discord notifications for tracked entities
+- [x] **Battle Notifications**: Automated Discord webhook notifications when battles meet criteria
+- [x] **Counter System**: W/L - KD - Winrate tracking with historical periods
+- [x] **CLI Management**: Command-line tools for managing tracking subscriptions
+
 ### 📋 Planned
 - [ ] **Backfill Mode**: Historical data ingestion
 - [ ] **Analytics Jobs**: Leaderboards and statistics
-- [ ] **Discord Bot**: Real-time battle notifications
 - [ ] **Dashboard**: Web interface for data exploration
 - [ ] **Advanced Metrics**: Custom dashboards and alerting
 

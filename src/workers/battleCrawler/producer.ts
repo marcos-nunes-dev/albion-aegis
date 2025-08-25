@@ -6,6 +6,7 @@ import { config } from '../../lib/config.js';
 import type { BattleListItem } from '../../types/albion.js';
 import { battleLogger } from '../../log.js';
 import { metrics } from '../../metrics.js';
+import { BattleNotifierProducer } from '../battleNotifier/producer.js';
 
 /**
  * Run battle crawl with sliding time window to avoid missing late-listed battles
@@ -27,7 +28,11 @@ export async function runBattleCrawl(): Promise<void> {
   let totalBattlesProcessed = 0;
   let totalBattlesUpserted = 0;
   let totalKillJobsEnqueued = 0;
+  let totalNotificationJobsEnqueued = 0;
   let maxStartedAtSeen: Date | null = null;
+  
+  // Initialize battle notifier producer
+  const battleNotifierProducer = new BattleNotifierProducer();
   
   try {
     // Crawl pages until we hit the soft cutoff or max pages
@@ -79,6 +84,19 @@ export async function runBattleCrawl(): Promise<void> {
              pageKillJobsEnqueued++;
              totalKillJobsEnqueued++;
            }
+           
+           // Enqueue battle notification job for new battles
+           if (upsertResult.wasCreated) {
+             try {
+               await battleNotifierProducer.enqueueBattleNotification(battle.albionId);
+               totalNotificationJobsEnqueued++;
+             } catch (error) {
+               battleLogger.warn('Failed to enqueue battle notification job', {
+                 albionId: battle.albionId.toString(),
+                 error: error instanceof Error ? error.message : 'Unknown error'
+               });
+             }
+           }
           
                  } catch (error) {
            battleLogger.error('Failed to process battle', { 
@@ -122,6 +140,7 @@ export async function runBattleCrawl(): Promise<void> {
        battlesProcessed: totalBattlesProcessed,
        battlesUpserted: totalBattlesUpserted,
        killJobsEnqueued: totalKillJobsEnqueued,
+       notificationJobsEnqueued: totalNotificationJobsEnqueued,
      });
      
    } catch (error) {
@@ -129,6 +148,9 @@ export async function runBattleCrawl(): Promise<void> {
        error: error instanceof Error ? error.message : 'Unknown error' 
      });
      throw error;
+   } finally {
+     // Clean up battle notifier producer
+     await battleNotifierProducer.close();
    }
 }
 
