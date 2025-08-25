@@ -77,10 +77,10 @@ export class TrackingService {
     entityType: 'GUILD' | 'ALLIANCE'
   ): Promise<GuildBattleStats | null> {
     try {
-      // Find the entity in the battle
+      // Find the entity in the battle (case-insensitive comparison)
       const entityData = entityType === 'GUILD' 
-        ? battleDetail.guilds.find(g => g.name === entityName)
-        : battleDetail.alliances.find(a => a.name === entityName);
+        ? battleDetail.guilds.find(g => g.name.toLowerCase() === entityName.toLowerCase())
+        : battleDetail.alliances.find(a => a.name.toLowerCase() === entityName.toLowerCase());
 
       if (!entityData) {
         logger.debug({

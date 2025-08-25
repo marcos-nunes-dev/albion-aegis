@@ -94,14 +94,14 @@ export const zKillEvent = z.object({
     Id: z.string(),
     Name: z.string().max(48),
     GuildName: z.string().max(64).optional(),
-    AllianceName: z.string().max(16).optional(),
+    AllianceName: z.string().max(16).optional().transform(val => val === "" ? undefined : val),
     AverageItemPower: z.number().nonnegative(),
     Equipment: z.object({
       MainHand: z.object({
         Name: z.string(),
         Type: z.string(),
         Quality: z.number().int().positive()
-      }).optional(),
+      }).nullable().optional(),
       Mount: z.object({
         Name: z.string(),
         Type: z.string(),
@@ -113,14 +113,14 @@ export const zKillEvent = z.object({
     Id: z.string(),
     Name: z.string().max(48),
     GuildName: z.string().max(64).optional(),
-    AllianceName: z.string().max(16).optional(),
+    AllianceName: z.string().max(16).optional().transform(val => val === "" ? undefined : val),
     AverageItemPower: z.number().nonnegative(),
     Equipment: z.object({
       MainHand: z.object({
         Name: z.string(),
         Type: z.string(),
         Quality: z.number().int().positive()
-      }).optional(),
+      }).nullable().optional(),
       Mount: z.object({
         Name: z.string(),
         Type: z.string(),
