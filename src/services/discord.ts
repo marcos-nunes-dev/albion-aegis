@@ -1,6 +1,6 @@
 import { WebhookClient } from 'discord.js';
 import { log } from '../log.js';
-import { DiscordWebhookPayload, GuildBattleStats } from '../types/albion.js';
+import { GuildBattleStats } from '../types/albion.js';
 
 const logger = log.child({ component: 'discord-webhook' });
 

@@ -28,8 +28,8 @@ const worker = new Worker<BattleNotificationJob>(
   {
     connection: redis,
     concurrency: config.BATTLE_NOTIFIER_CONCURRENCY || 2,
-    removeOnComplete: 100,
-    removeOnFail: 50
+    removeOnComplete: { count: 100 },
+    removeOnFail: { count: 50 }
   }
 );
 

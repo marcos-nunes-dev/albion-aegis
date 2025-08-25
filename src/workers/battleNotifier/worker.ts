@@ -13,11 +13,9 @@ export interface BattleNotificationJob {
 }
 
 export class BattleNotifierWorker {
-  private prisma: PrismaClient;
   private trackingService: TrackingService;
 
   constructor(prisma: PrismaClient) {
-    this.prisma = prisma;
     this.trackingService = new TrackingService(prisma);
   }
 
