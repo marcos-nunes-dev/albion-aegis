@@ -1,7 +1,6 @@
 import { PrismaClient } from '@prisma/client';
 import { log } from '../log.js';
 import { BattleDetail, GuildBattleStats, TrackingSubscription } from '../types/albion.js';
-import { getKillsForBattle } from '../http/client.js';
 
 const logger = log.child({ component: 'tracking-service' });
 
@@ -92,8 +91,11 @@ export class TrackingService {
         return null;
       }
 
-      // Get kill events to determine win/loss
-      const killEvents = await getKillsForBattle(battleDetail.albionId);
+      // Get kill events from database to determine win/loss
+      const killEvents = await this.prisma.killEvent.findMany({
+        where: { battleAlbionId: battleDetail.albionId },
+        orderBy: { TimeStamp: 'asc' }
+      });
       
       // Count kills and deaths for this entity
       let kills = 0;
@@ -101,12 +103,12 @@ export class TrackingService {
 
       for (const killEvent of killEvents) {
         const killerEntity = entityType === 'GUILD' 
-          ? killEvent.Killer.GuildName 
-          : killEvent.Killer.AllianceName;
+          ? killEvent.killerGuild 
+          : killEvent.killerAlliance;
         
         const victimEntity = entityType === 'GUILD' 
-          ? killEvent.Victim.GuildName 
-          : killEvent.Victim.AllianceName;
+          ? killEvent.victimGuild 
+          : killEvent.victimAlliance;
 
         if (killerEntity === entityName) {
           kills++;
