@@ -79,8 +79,8 @@ export class TrackingService {
     try {
       // Find the entity in the battle (case-insensitive comparison)
       const entityData = entityType === 'GUILD' 
-        ? battleDetail.guilds.find(g => g.name.toLowerCase() === entityName.toLowerCase())
-        : battleDetail.alliances.find(a => a.name.toLowerCase() === entityName.toLowerCase());
+        ? battleDetail.guilds.find(g => g.name && g.name.toLowerCase() === entityName.toLowerCase())
+        : battleDetail.alliances.find(a => a.name && a.name.toLowerCase() === entityName.toLowerCase());
 
       if (!entityData) {
         logger.debug({
