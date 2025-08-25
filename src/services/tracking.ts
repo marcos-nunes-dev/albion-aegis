@@ -97,6 +97,16 @@ export class TrackingService {
         orderBy: { TimeStamp: 'asc' }
       });
       
+      logger.debug({
+        message: 'Found kill events for battle analysis',
+        battleId: battleDetail.albionId.toString(),
+        entityName,
+        entityType,
+        killEventCount: killEvents.length,
+        uniqueGuilds: [...new Set(killEvents.map(ke => ke.killerGuild).filter(Boolean))],
+        uniqueAlliances: [...new Set(killEvents.map(ke => ke.killerAlliance).filter(Boolean))]
+      });
+      
       // Count kills and deaths for this entity
       let kills = 0;
       let deaths = 0;
@@ -110,11 +120,27 @@ export class TrackingService {
           ? killEvent.victimGuild 
           : killEvent.victimAlliance;
 
-        if (killerEntity === entityName) {
+        if (killerEntity && killerEntity.toLowerCase() === entityName.toLowerCase()) {
           kills++;
+          logger.debug({
+            message: 'Kill found for entity',
+            entityName,
+            entityType,
+            eventId: killEvent.EventId.toString(),
+            killer: killEvent.killerName,
+            victim: killEvent.victimName
+          });
         }
-        if (victimEntity === entityName) {
+        if (victimEntity && victimEntity.toLowerCase() === entityName.toLowerCase()) {
           deaths++;
+          logger.debug({
+            message: 'Death found for entity',
+            entityName,
+            entityType,
+            eventId: killEvent.EventId.toString(),
+            killer: killEvent.killerName,
+            victim: killEvent.victimName
+          });
         }
       }
 
