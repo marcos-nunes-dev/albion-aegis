@@ -91,18 +91,18 @@ export class DiscordWebhookService {
     }
 
     return {
-      title: `⚔️ Battle Alert: ${guildStats.entityName}`,
+      title: `🏆 Battle Alert: ${guildStats.entityName}`,
       description: description,
       url: albionBbUrl,
       color: color,
       fields: [
         {
-          name: '🏆 Battle Stats',
+          name: '⚔️ Battle',
           value: `**Fame:** ${guildStats.totalFame.toLocaleString()}\n**Kills:** ${guildStats.totalKills}\n**Players:** ${guildStats.totalPlayers}`,
           inline: true
         },
         {
-          name: '📊 This Battle',
+          name: '📊 Your Stats',
           value: `**Kills:** ${guildStats.kills}\n**Deaths:** ${guildStats.deaths}\n**Result:** ${result}`,
           inline: true
         }
