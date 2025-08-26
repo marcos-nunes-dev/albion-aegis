@@ -142,12 +142,15 @@ export class TrackingService {
       // Determine win/loss (more kills than deaths = win)
       const isWin = kills > deaths;
 
+      // Get entity's player count
+      const entityPlayerCount = entityData?.players || 0;
+
       const stats: GuildBattleStats = {
         entityName,
         entityType,
         totalFame: battleDetail.totalFame,
         totalKills: battleDetail.totalKills,
-        totalPlayers: battleDetail.totalPlayers,
+        totalPlayers: entityPlayerCount, // Use entity's player count instead of total battle players
         kills,
         deaths,
         isWin
@@ -161,7 +164,9 @@ export class TrackingService {
         kills,
         deaths,
         isWin,
-        totalFame: battleDetail.totalFame
+        totalFame: battleDetail.totalFame,
+        entityPlayerCount,
+        totalBattlePlayers: battleDetail.totalPlayers
       });
 
       return stats;
@@ -186,7 +191,15 @@ export class TrackingService {
   ): boolean {
     const meetsFame = battleDetail.totalFame >= subscription.minTotalFame;
     const meetsKills = battleDetail.totalKills >= subscription.minTotalKills;
-    const meetsPlayers = battleDetail.totalPlayers >= subscription.minTotalPlayers;
+    
+    // Find the entity in the battle to get its player count
+    const entityData = subscription.entityType === 'GUILD' 
+      ? battleDetail.guilds.find(g => g.name && g.name.toLowerCase() === subscription.entityName.toLowerCase())
+      : battleDetail.alliances.find(a => a.name && a.name.toLowerCase() === subscription.entityName.toLowerCase());
+    
+    // Check if entity has enough players (use entity's player count, not total battle players)
+    const entityPlayerCount = entityData?.players || 0;
+    const meetsPlayers = entityPlayerCount >= subscription.minTotalPlayers;
 
     const meetsCriteria = meetsFame && meetsKills && meetsPlayers;
 
@@ -194,10 +207,12 @@ export class TrackingService {
       message: 'Checked battle criteria',
       subscriptionId: subscription.id,
       entityName: subscription.entityName,
+      entityType: subscription.entityType,
       battleId: battleDetail.albionId.toString(),
       totalFame: battleDetail.totalFame,
       totalKills: battleDetail.totalKills,
       totalPlayers: battleDetail.totalPlayers,
+      entityPlayerCount,
       minFame: subscription.minTotalFame,
       minKills: subscription.minTotalKills,
       minPlayers: subscription.minTotalPlayers,
