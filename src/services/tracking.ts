@@ -101,14 +101,19 @@ export class TrackingService {
       battleAnalysisLogger.debug({
         message: 'Kill events found for battle',
         battleId: battleDetail.albionId.toString(),
-        killEvents: killEvents.length
+        killEvents: killEvents.map(ke => ke.killerGuild),
+        battleDetail: battleDetail.guilds.map(g => g.name),
+        allianceDetail: battleDetail.alliances.map(a => a.name)
       });
 
       logger.debug({
         message: 'Entity name',
         entityName,
         entityType,
-        battleId: battleDetail.albionId.toString()
+        battleId: battleDetail.albionId.toString(),
+        killEvents: killEvents.map(ke => ke.killerGuild),
+        battleDetail: battleDetail.guilds.map(g => g.name),
+        allianceDetail: battleDetail.alliances.map(a => a.name)
       });
       
       // Count kills and deaths for this entity
