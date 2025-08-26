@@ -1,6 +1,6 @@
 import { WebhookClient } from 'discord.js';
 import { log } from '../log.js';
-import { GuildBattleStats } from '../types/albion.js';
+import { GuildBattleStats, BattleDetail } from '../types/albion.js';
 
 const logger = log.child({ component: 'discord-webhook' });
 
@@ -22,10 +22,11 @@ export class DiscordWebhookService {
       losses: number;
       kills: number;
       deaths: number;
-    }
+    },
+    battleDetail?: BattleDetail
   ): Promise<boolean> {
     try {
-      const embed = this.createBattleEmbed(battleId, guildStats, counterStats);
+      const embed = this.createBattleEmbed(battleId, guildStats, counterStats, battleDetail);
       
       await this.webhookClient.send({
         embeds: [embed]
@@ -63,9 +64,10 @@ export class DiscordWebhookService {
       losses: number;
       kills: number;
       deaths: number;
-    }
+    },
+    battleDetail?: BattleDetail
   ) {
-    const albionBbUrl = `https://albionbattledata.com/battle/${battleId}`;
+    const albionBbUrl = `https://albionbb.com/battles/${battleId}`;
     const result = guildStats.isWin ? 'WIN' : 'LOSS';
     const color = guildStats.isWin ? 0x00ff00 : 0xff0000; // Green for win, red for loss
 
@@ -76,9 +78,21 @@ export class DiscordWebhookService {
     // Calculate K/D ratio
     const kdRatio = counterStats.deaths > 0 ? (counterStats.kills / counterStats.deaths).toFixed(2) : counterStats.kills.toString();
 
+    // Create description with guild names
+    let description = `**${result}** - `;
+    if (battleDetail && battleDetail.guilds.length > 0) {
+      const guildNames = battleDetail.guilds
+        .map(g => g.name)
+        .filter(Boolean)
+        .slice(0, 5); // Limit to first 5 guilds to avoid too long description
+      description += guildNames.join(', ');
+    } else {
+      description += 'Battle meets your tracking criteria!';
+    }
+
     return {
       title: `⚔️ Battle Alert: ${guildStats.entityName}`,
-      description: `**${result}** - Battle meets your tracking criteria!`,
+      description: description,
       url: albionBbUrl,
       color: color,
       fields: [

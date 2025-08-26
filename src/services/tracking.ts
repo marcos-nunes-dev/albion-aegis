@@ -4,7 +4,6 @@ import { BattleDetail, GuildBattleStats, TrackingSubscription } from '../types/a
 import { getKillsForBattle } from '../http/client.js';
 
 const logger = log.child({ component: 'tracking-service' });
-const battleAnalysisLogger = log.child({ component: 'battle-analysis' });
 
 export class TrackingService {
   private prisma: PrismaClient;
@@ -95,13 +94,13 @@ export class TrackingService {
 
       // Get kill events directly from Albion API to ensure we have the most up-to-date data
       const killEvents = await getKillsForBattle(battleDetail.albionId);
-      logger.debug({
+      console.log({
         message: 'Kill events fetched from API',
         battleId: battleDetail.albionId.toString(),
         killEventsCount: killEvents.length
       });
 
-      battleAnalysisLogger.debug({
+      logger.debug({
         message: 'Kill events found for battle',
         battleId: battleDetail.albionId.toString(),
         killEvents: killEvents.map(ke => ke.Killer.GuildName),

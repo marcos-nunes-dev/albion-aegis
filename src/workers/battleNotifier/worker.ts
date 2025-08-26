@@ -141,7 +141,8 @@ export class BattleNotifierWorker {
       const success = await discordService.sendBattleNotification(
         battleDetail.albionId,
         guildStats,
-        counterStats
+        counterStats,
+        battleDetail
       );
 
       if (success) {
