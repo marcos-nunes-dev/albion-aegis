@@ -98,12 +98,7 @@ export class BattleNotifierWorker {
       }
 
       logger.debug({
-        message: 'Analyzing battle for entity',
-        subscriptionId: subscription.id,
-        entityName: subscription.entityName,
-        entityType: subscription.entityType,
-        battleId: battleDetail.albionId.toString(),
-        battleDetail: JSON.stringify(battleDetail)
+        message: 'Analyzing battle for entity'
       });
 
       // Analyze battle for this entity
@@ -114,8 +109,7 @@ export class BattleNotifierWorker {
       );
 
       logger.debug({
-        message: 'Guild stats',
-        guildStats: JSON.stringify(guildStats)
+        message: 'Guild stats'
       });
 
       if (!guildStats) {
