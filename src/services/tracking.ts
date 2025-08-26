@@ -110,10 +110,10 @@ export class TrackingService {
           ? killEvent.victimGuild 
           : killEvent.victimAlliance;
 
-        if (killerEntity === entityName) {
+        if (killerEntity?.toLocaleLowerCase() === entityName.toLocaleLowerCase()) {
           kills++;
         }
-        if (victimEntity === entityName) {
+        if (victimEntity?.toLocaleLowerCase() === entityName.toLocaleLowerCase()) {
           deaths++;
         }
       }
