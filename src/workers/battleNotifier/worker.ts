@@ -97,12 +97,26 @@ export class BattleNotifierWorker {
         return;
       }
 
+      logger.debug({
+        message: 'Analyzing battle for entity',
+        subscriptionId: subscription.id,
+        entityName: subscription.entityName,
+        entityType: subscription.entityType,
+        battleId: battleDetail.albionId.toString(),
+        battleDetail: JSON.stringify(battleDetail)
+      });
+
       // Analyze battle for this entity
       const guildStats = await this.trackingService.analyzeBattleForEntity(
         battleDetail,
         subscription.entityName,
         subscription.entityType
       );
+
+      logger.debug({
+        message: 'Guild stats',
+        guildStats: JSON.stringify(guildStats)
+      });
 
       if (!guildStats) {
         logger.debug({
