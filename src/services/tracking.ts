@@ -3,6 +3,7 @@ import { log } from '../log.js';
 import { BattleDetail, GuildBattleStats, TrackingSubscription } from '../types/albion.js';
 
 const logger = log.child({ component: 'tracking-service' });
+const battleAnalysisLogger = log.child({ component: 'battle-analysis' });
 
 export class TrackingService {
   private prisma: PrismaClient;
@@ -96,6 +97,19 @@ export class TrackingService {
         where: { battleAlbionId: battleDetail.albionId },
         orderBy: { TimeStamp: 'asc' }
       });
+
+      battleAnalysisLogger.debug({
+        message: 'Kill events found for battle',
+        battleId: battleDetail.albionId.toString(),
+        killEvents: killEvents.length
+      });
+
+      logger.debug({
+        message: 'Entity name',
+        entityName,
+        entityType,
+        battleId: battleDetail.albionId.toString()
+      });
       
       // Count kills and deaths for this entity
       let kills = 0;
@@ -110,10 +124,10 @@ export class TrackingService {
           ? killEvent.victimGuild 
           : killEvent.victimAlliance;
 
-        if (killerEntity?.toLocaleLowerCase() === entityName.toLocaleLowerCase()) {
+        if (killerEntity?.toLowerCase() === entityName.toLowerCase()) {
           kills++;
         }
-        if (victimEntity?.toLocaleLowerCase() === entityName.toLocaleLowerCase()) {
+        if (victimEntity?.toLowerCase() === entityName.toLowerCase()) {
           deaths++;
         }
       }
