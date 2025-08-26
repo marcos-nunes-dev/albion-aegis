@@ -1,6 +1,7 @@
 import { PrismaClient } from '@prisma/client';
 import { log } from '../log.js';
 import { BattleDetail, GuildBattleStats, TrackingSubscription } from '../types/albion.js';
+import { getKillsForBattle } from '../http/client.js';
 
 const logger = log.child({ component: 'tracking-service' });
 const battleAnalysisLogger = log.child({ component: 'battle-analysis' });
@@ -92,16 +93,18 @@ export class TrackingService {
         return null;
       }
 
-      // Get kill events from database to determine win/loss
-      const killEvents = await this.prisma.killEvent.findMany({
-        where: { battleAlbionId: battleDetail.albionId },
-        orderBy: { TimeStamp: 'asc' }
+      // Get kill events directly from Albion API to ensure we have the most up-to-date data
+      const killEvents = await getKillsForBattle(battleDetail.albionId);
+      logger.debug({
+        message: 'Kill events fetched from API',
+        battleId: battleDetail.albionId.toString(),
+        killEventsCount: killEvents.length
       });
 
       battleAnalysisLogger.debug({
         message: 'Kill events found for battle',
         battleId: battleDetail.albionId.toString(),
-        killEvents: killEvents.map(ke => ke.killerGuild),
+        killEvents: killEvents.map(ke => ke.Killer.GuildName),
         battleDetail: battleDetail.guilds.map(g => g.name),
         allianceDetail: battleDetail.alliances.map(a => a.name)
       });
@@ -111,7 +114,7 @@ export class TrackingService {
         entityName,
         entityType,
         battleId: battleDetail.albionId.toString(),
-        killEvents: killEvents.map(ke => ke.killerGuild),
+        killEvents: killEvents.map(ke => ke.Killer.GuildName),
         battleDetail: battleDetail.guilds.map(g => g.name),
         allianceDetail: battleDetail.alliances.map(a => a.name)
       });
@@ -122,12 +125,12 @@ export class TrackingService {
 
       for (const killEvent of killEvents) {
         const killerEntity = entityType === 'GUILD' 
-          ? killEvent.killerGuild 
-          : killEvent.killerAlliance;
+          ? killEvent.Killer.GuildName 
+          : killEvent.Killer.AllianceName;
         
         const victimEntity = entityType === 'GUILD' 
-          ? killEvent.victimGuild 
-          : killEvent.victimAlliance;
+          ? killEvent.Victim.GuildName 
+          : killEvent.Victim.AllianceName;
 
         if (killerEntity?.toLowerCase() === entityName.toLowerCase()) {
           kills++;

@@ -97,20 +97,12 @@ export class BattleNotifierWorker {
         return;
       }
 
-      logger.debug({
-        message: 'Analyzing battle for entity'
-      });
-
       // Analyze battle for this entity
       const guildStats = await this.trackingService.analyzeBattleForEntity(
         battleDetail,
         subscription.entityName,
         subscription.entityType
       );
-
-      logger.debug({
-        message: 'Guild stats'
-      });
 
       if (!guildStats) {
         logger.debug({
