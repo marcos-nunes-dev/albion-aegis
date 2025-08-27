@@ -138,8 +138,118 @@ model BattleResult {
   @@index([processedAt])
 }
 
-// Enum for entity type
+// MMR System Models
+
+// Seasons management
+model Season {
+  id          String   @id @default(cuid())
+  name        String   @unique
+  startDate   DateTime
+  endDate     DateTime?
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Relations
+  guildSeasons GuildSeason[]
+  primeTimeWindows PrimeTimeWindow[]
+  mmrCalculationJobs MmrCalculationJob[]
+
+  @@index([isActive])
+  @@index([startDate])
+}
+
+// Prime time windows for mass calculations
+model PrimeTimeWindow {
+  id          String   @id @default(cuid())
+  seasonId    String
+  startHour   Int      // 0-23
+  endHour     Int      // 0-23
+  timezone    String   @default("UTC")
+  createdAt   DateTime @default(now())
+
+  // Relations
+  season      Season   @relation(fields: [seasonId], references: [id], onDelete: Cascade)
+
+  @@index([seasonId])
+}
+
+// Unique guilds with their IDs from AlbionBB API
+model Guild {
+  id          String   @id // AlbionBB guild ID
+  name        String   @unique
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Relations
+  guildSeasons GuildSeason[]
+
+  @@index([name])
+}
+
+// Guild MMR data per season
+model GuildSeason {
+  id                    String   @id @default(cuid())
+  guildId               String
+  seasonId              String
+  currentMmr            Float    @default(1000.0) // Starting MMR
+  previousSeasonMmr     Float?   // MMR from previous season for bonus calculation
+  carryoverMmr          Float?   // MMR carried over to next season (30% of final MMR)
+  seasonEndMmr          Float?   // Final MMR when season ended
+  totalBattles          Int      @default(0)
+  wins                  Int      @default(0)
+  losses                Int      @default(0)
+  totalFameGained       BigInt   @default(0)
+  totalFameLost         BigInt   @default(0)
+  avgPrimeTimeMass      Float?   // Average players during prime time battles
+  primeTimeBattles      Int      @default(0) // Count of prime time battles
+  lastBattleAt          DateTime?
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  // Relations
+  guild                 Guild    @relation(fields: [guildId], references: [id], onDelete: Cascade)
+  season                Season   @relation(fields: [seasonId], references: [id], onDelete: Cascade)
+
+  @@unique([guildId, seasonId])
+  @@index([guildId])
+  @@index([seasonId])
+  @@index([currentMmr])
+  @@index([lastBattleAt])
+}
+
+// MMR calculation jobs tracking
+model MmrCalculationJob {
+  id          String   @id @default(cuid())
+  battleId    BigInt
+  seasonId    String
+  status      MmrJobStatus @default(PENDING)
+  attempts    Int      @default(0)
+  maxAttempts Int      @default(3)
+  error       String?
+  processedAt DateTime?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Relations
+  season      Season   @relation(fields: [seasonId], references: [id], onDelete: Cascade)
+
+  @@unique([battleId, seasonId])
+  @@index([battleId])
+  @@index([seasonId])
+  @@index([status])
+}
+
+// Enums
 enum EntityType {
   GUILD
   ALLIANCE
+}
+
+enum MmrJobStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+  FAILED
+  RETRY
 }

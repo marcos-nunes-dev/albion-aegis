@@ -9,6 +9,7 @@ import {
   safeParseBattleDetail,
   safeParseKillEvents
 } from '../types/albion.js';
+import { GuildSearchResponse, safeParseGuildSearchResponse } from '../types/mmr.js';
 import { recordRateLimit, recordSuccess } from '../scheduler/crawlLoop.js';
 import { httpLogger } from '../log.js';
 import { metrics } from '../metrics.js';
@@ -371,6 +372,41 @@ export async function getKillsForBattle(albionId: bigint): Promise<KillEventsRes
       albionId: albionId.toString(), 
       error: errorMessage 
     });
+    throw new AlbionAPIError(`Unexpected error: ${errorMessage}`);
+  }
+}
+
+/**
+ * Search for guilds by name
+ * @param name - The name of the guild to search for
+ * @returns Promise<GuildSearchResponse>
+ */
+export async function searchGuilds(name: string): Promise<GuildSearchResponse> {
+  const url = `${config.API_BASE_URL}/guilds/search?name=${encodeURIComponent(name)}`;
+  
+  httpLogger.info('Searching for guilds', { name });
+  
+  try {
+    const data = await rateLimitedRequest(url);
+    
+    // Validate response with Zod
+    const guildSearchResponse = safeParseGuildSearchResponse(data);
+    if (!guildSearchResponse) {
+      throw new ValidationError('Invalid guild search response format');
+    }
+    
+    httpLogger.info('Successfully searched for guilds', { name, count: guildSearchResponse.length });
+    return guildSearchResponse;
+    
+  } catch (error) {
+    if (error instanceof AlbionAPIError) {
+      httpLogger.error('Failed to search for guilds', { name, error: error.message });
+      throw error;
+    }
+    
+    // Wrap unexpected errors
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+    httpLogger.error('Unexpected error searching for guilds', { name, error: errorMessage });
     throw new AlbionAPIError(`Unexpected error: ${errorMessage}`);
   }
 }

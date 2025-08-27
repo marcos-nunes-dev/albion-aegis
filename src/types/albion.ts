@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { zGuildSearchResponse, zMmrJobStatus, zGuild, zGuildSeason, zMmrCalculationJob, zPrimeTimeWindow, zSeason, zMmrCalculationInput } from './mmr';
 
 // Helper function to safely convert string to BigInt (removed - not needed for number inputs)
 // const safeBigIntTransform = (val: string) => {
@@ -263,6 +264,16 @@ export type CounterHistory = z.infer<typeof zCounterHistory>;
 export type BattleResult = z.infer<typeof zBattleResult>;
 export type DiscordWebhookPayload = z.infer<typeof zDiscordWebhookPayload>;
 export type GuildBattleStats = z.infer<typeof zGuildBattleStats>;
+
+// MMR System Types
+export type Season = z.infer<typeof zSeason>;
+export type PrimeTimeWindow = z.infer<typeof zPrimeTimeWindow>;
+export type Guild = z.infer<typeof zGuild>;
+export type GuildSeason = z.infer<typeof zGuildSeason>;
+export type MmrCalculationJob = z.infer<typeof zMmrCalculationJob>;
+export type MmrJobStatus = z.infer<typeof zMmrJobStatus>;
+export type GuildSearchResponse = z.infer<typeof zGuildSearchResponse>;
+export type MmrCalculationInput = z.infer<typeof zMmrCalculationInput>;
 
 // Helper functions for parsing
 export const parseBattleList = (data: unknown): BattleListResponse => {

@@ -5,6 +5,7 @@ import { killsFetchQueue } from '../../queue/queues.js';
 import { config } from '../../lib/config.js';
 import type { KillEvent } from '../../types/albion.js';
 import redis from '../../queue/connection.js';
+import { MmrIntegrationService } from '../../services/mmrIntegration.js';
 
 /**
  * Kills fetcher worker - processes jobs from killsFetchQueue
@@ -52,6 +53,14 @@ export function createKillsFetcherWorker(): Worker {
         
         // Mark battle as having kills fetched
         await markBattleKillsFetched(albionId);
+        
+        // Process battle for MMR calculation
+        try {
+          await processBattleForMmr(albionId, killEvents);
+        } catch (error) {
+          console.error(`⚠️ [${jobId}] MMR processing failed for battle ${albionId}:`, error);
+          // Don't throw - MMR processing failure shouldn't fail the kills job
+        }
         
         const totalProcessed = insertedCount + updatedCount;
         console.log(`✅ [${jobId}] Battle ${albionId} completed:`);
@@ -152,6 +161,38 @@ async function upsertKillEvent(killEvent: KillEvent, battleAlbionId: string) {
     });
     
     return { killEvent: newKillEvent, wasCreated: true };
+  }
+}
+
+/**
+ * Process battle for MMR calculation
+ */
+async function processBattleForMmr(albionId: string, killEvents: KillEvent[]): Promise<void> {
+  try {
+    // Get battle data from database
+    const battle = await prisma.battle.findUnique({
+      where: { albionId: BigInt(albionId) }
+    });
+    
+    if (!battle) {
+      console.log(`⚠️ Battle ${albionId} not found for MMR processing`);
+      return;
+    }
+    
+    // Initialize MMR integration service
+    const mmrIntegration = new MmrIntegrationService(prisma);
+    
+    // Process battle for MMR
+    await mmrIntegration.processBattleForMmr(
+      BigInt(albionId),
+      battle,
+      killEvents
+    );
+    
+    console.log(`🏆 MMR processing queued for battle ${albionId}`);
+  } catch (error) {
+    console.error(`❌ MMR processing failed for battle ${albionId}:`, error);
+    throw error;
   }
 }
 
