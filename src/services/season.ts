@@ -66,27 +66,18 @@ export class SeasonService {
   }
 
   /**
-   * Get the currently active season
+   * Get active season
    */
   async getActiveSeason(): Promise<Season | null> {
     try {
-      const activeSeason = await this.prisma.season.findFirst({
-        where: { isActive: true },
-        include: {
-          primeTimeWindows: true
-        }
+      return await this.prisma.season.findFirst({
+        where: { isActive: true }
       });
-
-      logger.debug('Retrieved active season', { 
-        found: !!activeSeason, 
-        seasonId: activeSeason?.id,
-        seasonName: activeSeason?.name 
-      });
-
-      return activeSeason;
     } catch (error) {
-      logger.error('Error getting active season', { error: error instanceof Error ? error.message : 'Unknown error' });
-      throw error;
+      logger.error('Error getting active season', {
+        error: error instanceof Error ? error.message : 'Unknown error'
+      });
+      return null;
     }
   }
 
@@ -95,18 +86,15 @@ export class SeasonService {
    */
   async getSeasonById(seasonId: string): Promise<Season | null> {
     try {
-      const season = await this.prisma.season.findUnique({
-        where: { id: seasonId },
-        include: {
-          primeTimeWindows: true
-        }
+      return await this.prisma.season.findUnique({
+        where: { id: seasonId }
       });
-
-      logger.debug('Retrieved season by ID', { seasonId, found: !!season });
-      return season;
     } catch (error) {
-      logger.error('Error getting season by ID', { seasonId, error: error instanceof Error ? error.message : 'Unknown error' });
-      throw error;
+      logger.error('Error getting season by ID', {
+        seasonId,
+        error: error instanceof Error ? error.message : 'Unknown error'
+      });
+      return null;
     }
   }
 
@@ -115,18 +103,15 @@ export class SeasonService {
    */
   async getSeasonByName(name: string): Promise<Season | null> {
     try {
-      const season = await this.prisma.season.findUnique({
-        where: { name },
-        include: {
-          primeTimeWindows: true
-        }
+      return await this.prisma.season.findUnique({
+        where: { name }
       });
-
-      logger.debug('Retrieved season by name', { name, found: !!season });
-      return season;
     } catch (error) {
-      logger.error('Error getting season by name', { name, error: error instanceof Error ? error.message : 'Unknown error' });
-      throw error;
+      logger.error('Error getting season by name', {
+        name,
+        error: error instanceof Error ? error.message : 'Unknown error'
+      });
+      return null;
     }
   }
 
@@ -135,18 +120,14 @@ export class SeasonService {
    */
   async getAllSeasons(): Promise<Season[]> {
     try {
-      const seasons = await this.prisma.season.findMany({
-        orderBy: { startDate: 'desc' },
-        include: {
-          primeTimeWindows: true
-        }
+      return await this.prisma.season.findMany({
+        orderBy: { startDate: 'desc' }
       });
-
-      logger.debug('Retrieved all seasons', { count: seasons.length });
-      return seasons;
     } catch (error) {
-      logger.error('Error getting all seasons', { error: error instanceof Error ? error.message : 'Unknown error' });
-      throw error;
+      logger.error('Error getting all seasons', {
+        error: error instanceof Error ? error.message : 'Unknown error'
+      });
+      return [];
     }
   }
 
@@ -218,14 +199,9 @@ export class SeasonService {
   }
 
   /**
-   * Add prime time window to a season
+   * Add a global prime time window
    */
-  async addPrimeTimeWindow(
-    seasonId: string, 
-    startHour: number, 
-    endHour: number, 
-    timezone: string = 'UTC'
-  ): Promise<PrimeTimeWindow> {
+  async addPrimeTimeWindow(startHour: number, endHour: number, timezone: string = "UTC"): Promise<PrimeTimeWindow> {
     try {
       // Validate hours
       if (startHour < 0 || startHour > 23 || endHour < 0 || endHour > 23) {
@@ -234,36 +210,33 @@ export class SeasonService {
 
       const primeTimeWindow = await this.prisma.primeTimeWindow.create({
         data: {
-          seasonId,
           startHour,
           endHour,
           timezone
         }
       });
 
-      logger.info('Added prime time window to season', { 
-        seasonId, 
-        startHour, 
-        endHour, 
-        timezone,
-        windowId: primeTimeWindow.id 
+      logger.info('Added global prime time window', {
+        id: primeTimeWindow.id,
+        startHour: primeTimeWindow.startHour,
+        endHour: primeTimeWindow.endHour,
+        timezone: primeTimeWindow.timezone
       });
 
       return primeTimeWindow;
     } catch (error) {
-      logger.error('Error adding prime time window', { 
-        seasonId, 
-        startHour, 
-        endHour, 
-        timezone, 
-        error: error instanceof Error ? error.message : 'Unknown error' 
+      logger.error('Error adding global prime time window', {
+        startHour,
+        endHour,
+        timezone,
+        error: error instanceof Error ? error.message : 'Unknown error'
       });
       throw error;
     }
   }
 
   /**
-   * Remove prime time window from a season
+   * Remove a global prime time window
    */
   async removePrimeTimeWindow(windowId: string): Promise<void> {
     try {
@@ -271,28 +244,29 @@ export class SeasonService {
         where: { id: windowId }
       });
 
-      logger.info('Removed prime time window', { windowId });
+      logger.info('Removed global prime time window', { windowId });
     } catch (error) {
-      logger.error('Error removing prime time window', { windowId, error: error instanceof Error ? error.message : 'Unknown error' });
+      logger.error('Error removing global prime time window', {
+        windowId,
+        error: error instanceof Error ? error.message : 'Unknown error'
+      });
       throw error;
     }
   }
 
   /**
-   * Get prime time windows for a season
+   * Get all global prime time windows
    */
-  async getPrimeTimeWindows(seasonId: string): Promise<PrimeTimeWindow[]> {
+  async getPrimeTimeWindows(): Promise<PrimeTimeWindow[]> {
     try {
-      const primeTimeWindows = await this.prisma.primeTimeWindow.findMany({
-        where: { seasonId },
+      return await this.prisma.primeTimeWindow.findMany({
         orderBy: { startHour: 'asc' }
       });
-
-      logger.debug('Retrieved prime time windows for season', { seasonId, count: primeTimeWindows.length });
-      return primeTimeWindows;
     } catch (error) {
-      logger.error('Error getting prime time windows', { seasonId, error: error instanceof Error ? error.message : 'Unknown error' });
-      throw error;
+      logger.error('Error getting global prime time windows', {
+        error: error instanceof Error ? error.message : 'Unknown error'
+      });
+      return [];
     }
   }
 
@@ -301,7 +275,7 @@ export class SeasonService {
    */
   async isPrimeTime(seasonId: string, date: Date): Promise<boolean> {
     try {
-      const primeTimeWindows = await this.getPrimeTimeWindows(seasonId);
+      const primeTimeWindows = await this.getPrimeTimeWindows();
       
       if (primeTimeWindows.length === 0) {
         return false; // No prime time windows defined

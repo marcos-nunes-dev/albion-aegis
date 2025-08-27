@@ -152,26 +152,10 @@ model Season {
 
   // Relations
   guildSeasons GuildSeason[]
-  primeTimeWindows PrimeTimeWindow[]
   mmrCalculationJobs MmrCalculationJob[]
 
   @@index([isActive])
   @@index([startDate])
-}
-
-// Prime time windows for mass calculations
-model PrimeTimeWindow {
-  id          String   @id @default(cuid())
-  seasonId    String
-  startHour   Int      // 0-23
-  endHour     Int      // 0-23
-  timezone    String   @default("UTC")
-  createdAt   DateTime @default(now())
-
-  // Relations
-  season      Season   @relation(fields: [seasonId], references: [id], onDelete: Cascade)
-
-  @@index([seasonId])
 }
 
 // Unique guilds with their IDs from AlbionBB API
@@ -201,7 +185,6 @@ model GuildSeason {
   losses                Int      @default(0)
   totalFameGained       BigInt   @default(0)
   totalFameLost         BigInt   @default(0)
-  avgPrimeTimeMass      Float?   // Average players during prime time battles
   primeTimeBattles      Int      @default(0) // Count of prime time battles
   lastBattleAt          DateTime?
   createdAt             DateTime @default(now())
@@ -210,12 +193,48 @@ model GuildSeason {
   // Relations
   guild                 Guild    @relation(fields: [guildId], references: [id], onDelete: Cascade)
   season                Season   @relation(fields: [seasonId], references: [id], onDelete: Cascade)
+  primeTimeMasses       GuildPrimeTimeMass[]
 
   @@unique([guildId, seasonId])
   @@index([guildId])
   @@index([seasonId])
   @@index([currentMmr])
   @@index([lastBattleAt])
+}
+
+// Guild mass data per prime time window
+model GuildPrimeTimeMass {
+  id                    String   @id @default(cuid())
+  guildSeasonId         String
+  primeTimeWindowId     String
+  avgMass               Float    @default(0.0) // Average players during this prime time
+  battleCount           Int      @default(0) // Number of battles in this prime time
+  lastBattleAt          DateTime?
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  // Relations
+  guildSeason           GuildSeason @relation(fields: [guildSeasonId], references: [id], onDelete: Cascade)
+  primeTimeWindow       PrimeTimeWindow @relation(fields: [primeTimeWindowId], references: [id], onDelete: Cascade)
+
+  @@unique([guildSeasonId, primeTimeWindowId])
+  @@index([guildSeasonId])
+  @@index([primeTimeWindowId])
+  @@index([avgMass])
+}
+
+// Prime time windows for mass calculations (GLOBAL - same for all seasons)
+model PrimeTimeWindow {
+  id          String   @id @default(cuid())
+  startHour   Int      // 0-23
+  endHour     Int      // 0-23
+  timezone    String   @default("UTC")
+  createdAt   DateTime @default(now())
+
+  // Relations
+  guildMasses GuildPrimeTimeMass[]
+
+  @@index([startHour, endHour])
 }
 
 // MMR calculation jobs tracking

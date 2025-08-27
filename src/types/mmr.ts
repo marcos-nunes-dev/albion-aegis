@@ -13,10 +13,9 @@ export const zSeason = z.object({
   updatedAt: z.date()
 });
 
-// Prime Time Window Schema
+// Prime Time Window Schema (GLOBAL - same for all seasons)
 export const zPrimeTimeWindow = z.object({
   id: z.string().cuid(),
-  seasonId: z.string().cuid(),
   startHour: z.number().int().min(0).max(23),
   endHour: z.number().int().min(0).max(23),
   timezone: z.string().default("UTC"),
@@ -43,8 +42,19 @@ export const zGuildSeason = z.object({
   losses: z.number().int().min(0).default(0),
   totalFameGained: z.bigint().default(0n),
   totalFameLost: z.bigint().default(0n),
-  avgPrimeTimeMass: z.number().nullable(),
   primeTimeBattles: z.number().int().min(0).default(0),
+  lastBattleAt: z.date().nullable(),
+  createdAt: z.date(),
+  updatedAt: z.date()
+});
+
+// Guild Prime Time Mass Schema
+export const zGuildPrimeTimeMass = z.object({
+  id: z.string().cuid(),
+  guildSeasonId: z.string().cuid(),
+  primeTimeWindowId: z.string().cuid(),
+  avgMass: z.number().default(0.0),
+  battleCount: z.number().int().min(0).default(0),
   lastBattleAt: z.date().nullable(),
   createdAt: z.date(),
   updatedAt: z.date()
@@ -96,6 +106,7 @@ export type Season = z.infer<typeof zSeason>;
 export type PrimeTimeWindow = z.infer<typeof zPrimeTimeWindow>;
 export type Guild = z.infer<typeof zGuild>;
 export type GuildSeason = z.infer<typeof zGuildSeason>;
+export type GuildPrimeTimeMass = z.infer<typeof zGuildPrimeTimeMass>;
 export type MmrCalculationJob = z.infer<typeof zMmrCalculationJob>;
 export type MmrJobStatus = z.infer<typeof zMmrJobStatus>;
 export type GuildSearchResponse = z.infer<typeof zGuildSearchResponse>;

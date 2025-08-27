@@ -42,7 +42,7 @@ async function main() {
         await addPrimeTime(args);
         break;
       case 'list-prime-times':
-        await listPrimeTimes(args);
+        await listPrimeTimes();
         break;
       case 'process-historical':
         await processHistorical(args);
@@ -64,6 +64,9 @@ async function main() {
         break;
       case 'guild-mmr':
         await getGuildMmr(args);
+        break;
+      case 'guild-prime-time-mass':
+        await getGuildPrimeTimeMass(args);
         break;
       default:
         showHelp();
@@ -125,32 +128,30 @@ async function endSeason(args: string[]) {
 }
 
 async function addPrimeTime(args: string[]) {
-  if (args.length < 3) {
-    console.log('Usage: add-prime-time <seasonId> <startHour> <endHour>');
-    console.log('Example: add-prime-time "season-1" 20 21');
+  if (args.length < 2) {
+    console.log('Usage: add-prime-time <startHour> <endHour>');
+    console.log('Example: add-prime-time 20 21');
     return;
   }
 
-  const [seasonId, startHourStr, endHourStr] = args;
+  const [startHourStr, endHourStr] = args;
   const startHour = parseInt(startHourStr);
   const endHour = parseInt(endHourStr);
 
-  await seasonService.addPrimeTimeWindow(seasonId, startHour, endHour);
-  console.log('✅ Prime time window added:', { seasonId, startHour, endHour });
+  await seasonService.addPrimeTimeWindow(startHour, endHour);
+  console.log('✅ Global prime time window added:', { startHour, endHour });
 }
 
-async function listPrimeTimes(args: string[]) {
-  if (args.length < 1) {
-    console.log('Usage: list-prime-times <seasonId>');
-    return;
+async function listPrimeTimes() {
+  const windows = await seasonService.getPrimeTimeWindows();
+  console.log('📋 Global prime time windows:');
+  if (windows.length === 0) {
+    console.log('  No prime time windows configured');
+  } else {
+    windows.forEach((window, index) => {
+      console.log(`  ${index + 1}. ${window.startHour}:00 - ${window.endHour}:00 UTC (ID: ${window.id})`);
+    });
   }
-
-  const seasonId = args[0];
-  const windows = await seasonService.getPrimeTimeWindows(seasonId);
-  console.log('📋 Prime time windows:');
-  windows.forEach(window => {
-    console.log(`  ${window.startHour}:00 - ${window.endHour}:00 UTC`);
-  });
 }
 
 async function processHistorical(args: string[]) {
@@ -285,6 +286,31 @@ async function getGuildMmr(args: string[]) {
   }
 }
 
+async function getGuildPrimeTimeMass(args: string[]) {
+  if (args.length < 2) {
+    console.log('Usage: guild-prime-time-mass <guildId> <seasonId>');
+    return;
+  }
+
+  const [guildId, seasonId] = args;
+  const guildSeason = await mmrService.getGuildSeasonMmr(guildId, seasonId);
+
+  if (!guildSeason) {
+    console.log('❌ Guild season not found');
+    return;
+  }
+
+  const primeTimeMassData = await mmrService.getGuildPrimeTimeMass(guildSeason.id);
+  if (primeTimeMassData.length > 0) {
+    console.log('✅ Prime time mass data:');
+    primeTimeMassData.forEach((mass: any) => {
+      console.log(`  - ${mass.primeTimeWindow.startHour}:00-${mass.primeTimeWindow.endHour}:00: ${mass.avgMass.toFixed(1)} avg players (${mass.battleCount} battles)`);
+    });
+  } else {
+    console.log('ℹ️  No prime time mass data available yet (requires database migration and Prisma client regeneration)');
+  }
+}
+
 function showHelp() {
   console.log(`
 🏆 Albion MMR Management Tool
@@ -303,6 +329,7 @@ Commands:
   health-check                                    Check MMR system health
   top-guilds [limit] [seasonId]                  Get top guilds by MMR
   guild-mmr <guildName> [seasonId]               Get guild MMR
+  guild-prime-time-mass <guildId> <seasonId>    Get prime time mass data for a guild
 
 Examples:
   yarn tsx apps/manage-mmr.ts create-season "Season 1" "2024-01-01"
