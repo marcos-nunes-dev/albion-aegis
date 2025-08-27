@@ -21,6 +21,12 @@ const MMR_CONSTANTS = {
   MIN_BATTLE_SIZE: 25, // Minimum players for MMR calculation
   MIN_BATTLE_FAME: 2000000, // Minimum fame for MMR calculation (2M)
   SEASON_CARRYOVER_RATIO: 0.3, // 30% of previous season MMR carries over
+  // Dynamic participation thresholds (relative to battle totals)
+  MIN_FAME_PARTICIPATION_RATIO: 0.005, // 0.5% of total battle fame for participation
+  MIN_KILLS_DEATHS_RATIO: 0.01, // 1% of total battle kills+deaths for participation
+  MIN_PLAYER_RATIO: 0.01, // 1% of total battle players for participation
+  // Alliance participation bonus (guilds from same alliance get more lenient thresholds)
+  ALLIANCE_PARTICIPATION_BONUS: 0.5, // 50% bonus for participating in major alliances
 } as const;
 
 export interface GuildBattleStats {
@@ -47,6 +53,8 @@ export interface BattleAnalysis {
   isPrimeTime: boolean;
   killClustering: number; // clustering score
   friendGroups: string[][]; // groups of guilds that fought together
+  // Alliance data for participation analysis
+  guildAlliances?: Map<string, string>; // guildName -> allianceName mapping
 }
 
 export class MmrService {
@@ -773,4 +781,111 @@ export class MmrService {
       return MMR_CONSTANTS.BASE_MMR; // Return base MMR on error
     }
   }
+
+  /**
+   * Check if a guild has significant participation in a battle
+   * Uses dynamic thresholds relative to total battle statistics
+   */
+  static hasSignificantParticipation(
+    guildStat: GuildBattleStats, 
+    battleAnalysis: BattleAnalysis
+  ): boolean {
+    const totalBattleFame = battleAnalysis.totalFame;
+    const totalBattlePlayers = battleAnalysis.totalPlayers;
+    const totalBattleKills = battleAnalysis.guildStats.reduce((sum, g) => sum + g.kills, 0);
+    const totalBattleDeaths = battleAnalysis.guildStats.reduce((sum, g) => sum + g.deaths, 0);
+    const totalBattleKillsDeaths = totalBattleKills + totalBattleDeaths;
+
+    // Calculate guild's participation ratios
+    const guildFameParticipation = guildStat.fameGained + guildStat.fameLost;
+    const guildKillsDeaths = guildStat.kills + guildStat.deaths;
+    
+    const fameRatio = totalBattleFame > 0 ? guildFameParticipation / totalBattleFame : 0;
+    const killsDeathsRatio = totalBattleKillsDeaths > 0 ? guildKillsDeaths / totalBattleKillsDeaths : 0;
+    const playerRatio = totalBattlePlayers > 0 ? guildStat.players / totalBattlePlayers : 0;
+
+    // Check if guild is from a major participating alliance
+    const isFromMajorAlliance = this.isFromMajorParticipatingAlliance(guildStat, battleAnalysis);
+
+    // Apply alliance bonus if guild is from major participating alliance
+    const allianceBonus = isFromMajorAlliance ? MMR_CONSTANTS.ALLIANCE_PARTICIPATION_BONUS : 0;
+    const adjustedFameThreshold = MMR_CONSTANTS.MIN_FAME_PARTICIPATION_RATIO * (1 - allianceBonus);
+    const adjustedKillsDeathsThreshold = MMR_CONSTANTS.MIN_KILLS_DEATHS_RATIO * (1 - allianceBonus);
+    const adjustedPlayerThreshold = MMR_CONSTANTS.MIN_PLAYER_RATIO * (1 - allianceBonus);
+
+    // Check participation criteria
+    const hasFameParticipation = fameRatio >= adjustedFameThreshold;
+    const hasKillsDeathsParticipation = killsDeathsRatio >= adjustedKillsDeathsThreshold;
+    const hasPlayerParticipation = playerRatio >= adjustedPlayerThreshold;
+
+    // Guild must meet at least 2 out of 3 criteria, or be from a major alliance
+    const participationScore = [hasFameParticipation, hasKillsDeathsParticipation, hasPlayerParticipation]
+      .filter(Boolean).length;
+
+    const hasSignificantParticipation = participationScore >= 2 || isFromMajorAlliance;
+
+    // Log detailed participation analysis
+    console.log(`📊 [MMR-SERVICE] Guild ${guildStat.guildName} participation analysis:`);
+    console.log(`   - Fame: ${guildFameParticipation.toLocaleString()} / ${totalBattleFame.toLocaleString()} (${(fameRatio * 100).toFixed(2)}%) [threshold: ${(adjustedFameThreshold * 100).toFixed(2)}%]`);
+    console.log(`   - Kills+Deaths: ${guildKillsDeaths} / ${totalBattleKillsDeaths} (${(killsDeathsRatio * 100).toFixed(2)}%) [threshold: ${(adjustedKillsDeathsThreshold * 100).toFixed(2)}%]`);
+    console.log(`   - Players: ${guildStat.players} / ${totalBattlePlayers} (${(playerRatio * 100).toFixed(2)}%) [threshold: ${(adjustedPlayerThreshold * 100).toFixed(2)}%]`);
+    console.log(`   - From major alliance: ${isFromMajorAlliance ? 'YES' : 'NO'}`);
+    console.log(`   - Participation score: ${participationScore}/3`);
+    console.log(`   - Result: ${hasSignificantParticipation ? '✅ INCLUDED' : '❌ EXCLUDED'}`);
+
+    return hasSignificantParticipation;
+  }
+
+  /**
+   * Check if guild is from a major participating alliance in the battle
+   * Major alliances are those that have significant participation in the battle
+   */
+  private static isFromMajorParticipatingAlliance(
+    guildStat: GuildBattleStats,
+    battleAnalysis: BattleAnalysis
+  ): boolean {
+    // Get alliance data from the battle analysis context
+    // This should be passed from the battle data (alliancesJson or kills data)
+    const guildAlliance = this.getGuildAlliance(guildStat.guildName, battleAnalysis);
+    if (!guildAlliance) return false;
+    
+    // Calculate total participation by alliance from the battle data
+    const allianceStats = new Map<string, { fame: number; killsDeaths: number; players: number }>();
+    
+    for (const guild of battleAnalysis.guildStats) {
+      const allianceName = this.getGuildAlliance(guild.guildName, battleAnalysis);
+      if (!allianceName) continue;
+      
+      const stats = allianceStats.get(allianceName) || { fame: 0, killsDeaths: 0, players: 0 };
+      stats.fame += guild.fameGained + guild.fameLost;
+      stats.killsDeaths += guild.kills + guild.deaths;
+      stats.players += guild.players;
+      allianceStats.set(allianceName, stats);
+    }
+    
+    // Sort alliances by total fame to find major participants
+    const sortedAlliances = Array.from(allianceStats.entries())
+      .sort(([,a], [,b]) => b.fame - a.fame);
+    
+    // Consider top 3 alliances as major participants
+    const majorAlliances = sortedAlliances.slice(0, 3).map(([name]) => name);
+    
+    return majorAlliances.includes(guildAlliance);
+  }
+
+  /**
+   * Get guild's alliance from battle data
+   * Uses actual alliance data from the battle context
+   */
+  private static getGuildAlliance(guildName: string, battleAnalysis: BattleAnalysis): string | null {
+    // Use the alliance mapping from battle analysis if available
+    if (battleAnalysis.guildAlliances) {
+      return battleAnalysis.guildAlliances.get(guildName) || null;
+    }
+    
+    // Fallback: try to extract from kills data if available
+    // This would require passing kills data to the battle analysis
+    return null;
+  }
+
 }

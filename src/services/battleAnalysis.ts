@@ -71,12 +71,37 @@ export class BattleAnalysisService {
 
       console.log(`📊 [BATTLE-ANALYSIS] Found ${guildStats.length} guilds in battle ${battleId}`);
 
+      // Filter out guilds with insignificant participation
+      console.log(`🏆 [BATTLE-ANALYSIS] Filtering guilds with insignificant participation`);
+      const { MmrService } = await import('./mmr.js');
+      
+      // Create a temporary battle analysis for filtering
+      const tempBattleAnalysis = {
+        battleId: battleId,
+        seasonId: season.id,
+        guildStats,
+        totalPlayers,
+        totalFame,
+        battleDuration,
+        isPrimeTime: await this.seasonService.isPrimeTime(season.id, battleDate),
+        killClustering: this.calculateKillClustering(killsData),
+        friendGroups: this.detectFriendGroups(guildStats, killsData)
+      };
+      
+      const significantGuildStats = guildStats.filter(guildStat => {
+        const hasSignificantParticipation = MmrService.hasSignificantParticipation(guildStat, tempBattleAnalysis);
+        if (!hasSignificantParticipation) {
+          console.log(`⚠️ [BATTLE-ANALYSIS] Filtering out guild ${guildStat.guildName} - insignificant participation (${guildStat.kills} kills, ${guildStat.deaths} deaths, ${guildStat.fameGained} fame gained, ${guildStat.fameLost} fame lost, ${guildStat.players} players)`);
+        }
+        return hasSignificantParticipation;
+      });
+
       // Check if we have enough guilds for meaningful MMR calculation
-      if (guildStats.length < 2) {
-        console.log(`❌ [BATTLE-ANALYSIS] Not enough guilds (${guildStats.length}) for MMR calculation in battle ${battleId}`);
+      if (significantGuildStats.length < 2) {
+        console.log(`❌ [BATTLE-ANALYSIS] Not enough guilds (${significantGuildStats.length}) for MMR calculation in battle ${battleId}`);
         logger.debug('Not enough guilds for MMR calculation', {
           battleId: battleId.toString(),
-          guildCount: guildStats.length
+          guildCount: significantGuildStats.length
         });
         return null;
       }
@@ -93,13 +118,16 @@ export class BattleAnalysisService {
 
       // Detect friend groups
       console.log(`🏆 [BATTLE-ANALYSIS] Detecting friend groups for battle ${battleId}`);
-      const friendGroups = this.detectFriendGroups(guildStats, killsData);
+      const friendGroups = this.detectFriendGroups(significantGuildStats, killsData);
       console.log(`📊 [BATTLE-ANALYSIS] Battle ${battleId} friend groups: ${friendGroups.length}`);
 
       // Get current MMR for all guilds
       console.log(`🏆 [BATTLE-ANALYSIS] Getting current MMR for guilds in battle ${battleId}`);
-      const guildStatsWithMmr = await this.addCurrentMmrToGuildStats(guildStats, season.id);
+      const guildStatsWithMmr = await this.addCurrentMmrToGuildStats(significantGuildStats, season.id);
       console.log(`📊 [BATTLE-ANALYSIS] Added MMR data for ${guildStatsWithMmr.length} guilds in battle ${battleId}`);
+
+      // Extract alliance data from battle data and kills data
+      const guildAlliances = this.extractGuildAlliances(battleData, killsData);
 
       const battleAnalysis: BattleAnalysis = {
         battleId,
@@ -110,7 +138,8 @@ export class BattleAnalysisService {
         battleDuration,
         isPrimeTime,
         killClustering,
-        friendGroups
+        friendGroups,
+        guildAlliances
       };
 
       console.log(`✅ [BATTLE-ANALYSIS] Successfully created battle analysis for battle ${battleId}`);
@@ -667,6 +696,71 @@ export class BattleAnalysisService {
         }
       })
     );
+  }
+
+  /**
+   * Extract guild alliances from battle data and kills data
+   */
+  private extractGuildAlliances(battleData: any, killsData: any[]): Map<string, string> {
+    const guildAlliances = new Map<string, string>();
+
+    try {
+      // First try to get alliances from battle data guilds
+      if (battleData.guilds && Array.isArray(battleData.guilds)) {
+        for (const guild of battleData.guilds) {
+          if (guild.name && guild.alliance) {
+            guildAlliances.set(guild.name, guild.alliance);
+          }
+        }
+      }
+      
+      // Then try to get alliances from guildsJson
+      if (battleData.guildsJson && typeof battleData.guildsJson === 'object') {
+        const guildsJson = battleData.guildsJson;
+        if (Array.isArray(guildsJson)) {
+          for (const guild of guildsJson) {
+            if (guild.name && guild.alliance) {
+              guildAlliances.set(guild.name, guild.alliance);
+            }
+          }
+        } else {
+          // Handle object format
+          for (const [key, guildInfo] of Object.entries(guildsJson)) {
+            const guildName = (guildInfo as any).name || (guildInfo as any).Name || key;
+            const alliance = (guildInfo as any).alliance || (guildInfo as any).Alliance;
+            if (guildName && alliance) {
+              guildAlliances.set(guildName, alliance);
+            }
+          }
+        }
+      }
+
+      // Finally, extract from kills data as fallback
+      for (const kill of killsData) {
+        // Try processed database format first
+        if (kill.killerGuild && kill.killerAlliance) {
+          guildAlliances.set(kill.killerGuild, kill.killerAlliance);
+        }
+        if (kill.victimGuild && kill.victimAlliance) {
+          guildAlliances.set(kill.victimGuild, kill.victimAlliance);
+        }
+        
+        // Try raw API response format
+        if (kill.Killer?.GuildName && kill.Killer?.AllianceName) {
+          guildAlliances.set(kill.Killer.GuildName, kill.Killer.AllianceName);
+        }
+        if (kill.Victim?.GuildName && kill.Victim?.AllianceName) {
+          guildAlliances.set(kill.Victim.GuildName, kill.Victim.AllianceName);
+        }
+      }
+
+      console.log(`📊 [BATTLE-ANALYSIS] Extracted ${guildAlliances.size} guild alliances`);
+      return guildAlliances;
+
+    } catch (error) {
+      console.error(`❌ [BATTLE-ANALYSIS] Error extracting guild alliances:`, error);
+      return new Map();
+    }
   }
 
   /**
