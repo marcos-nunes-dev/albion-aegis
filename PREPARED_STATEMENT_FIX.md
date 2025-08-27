@@ -5,7 +5,7 @@
 You're experiencing this error after implementing a database pooler:
 
 ```
-ConnectorError(ConnectorError { user_facing_error: None, kind: QueryError(PostgresError { code: "26000", message: "prepared statement \"s20\" does not exist", severity: "ERROR", detail: None, column: None, hint: None }), transient: false })
+ConnectorError(ConnectorError { user_facing_error: None, kind: QueryError(PostgresError { code: "42P05", message: "prepared statement \"s1\" already exists", severity: "ERROR", detail: None, column: None, hint: None }), transient: false })
 ```
 
 ## 🎯 Root Cause
@@ -13,29 +13,68 @@ ConnectorError(ConnectorError { user_facing_error: None, kind: QueryError(Postgr
 This error occurs when using **database connection pooling** (like PgBouncer, Railway's built-in pooling, or similar) with Prisma because:
 
 1. **Prisma uses prepared statements** for performance optimization
-2. **Prepared statements are tied to specific database connections**
-3. **When connections are reused from the pool**, the prepared statements from the previous session become invalid
-4. **The pooler returns a connection** that doesn't have the expected prepared statements
+2. **Multiple Prisma client instances** try to create the same prepared statements
+3. **Connection poolers reuse connections** that already have prepared statements
+4. **Prepared statement conflicts** occur when the same statement name is used
 
 ## ✅ Solution Applied
 
-### 1. Updated Battle Crawler Producer
+### 1. Enhanced Database Manager
 
-**File**: `src/workers/battleCrawler/producer.ts`
+**File**: `src/db/database.ts`
 
-**Before**:
+**Key Changes**:
+- Added pooler-compatible URL configuration
+- Enhanced error handling for prepared statement conflicts
+- Automatic reconnection on prepared statement errors
+- Better connection pooling parameters
+
 ```typescript
-import { prisma } from '../../db/prisma.js';
+private getPoolerCompatibleUrl(): string {
+  const originalUrl = process.env.DATABASE_URL;
+  const url = new URL(originalUrl);
+  
+  // Add parameters for better pooler compatibility
+  url.searchParams.set('connection_limit', '10');
+  url.searchParams.set('pool_timeout', '30');
+  url.searchParams.set('connect_timeout', '30');
+  
+  // For Railway and other poolers
+  if (url.hostname.includes('railway') || url.hostname.includes('pooler')) {
+    url.searchParams.set('pgbouncer', 'true');
+    url.searchParams.set('prepared_statements', 'false');
+  }
 
-async function upsertBattle(battle: BattleListItem) {
-  const existingBattle = await prisma.battle.findUnique({
-    where: { albionId: battle.albionId }
-  });
-  // ... rest of function
+  return url.toString();
 }
 ```
 
-**After**:
+### 2. Enhanced Error Handling
+
+Added specific handling for prepared statement conflicts:
+
+```typescript
+// Check if it's a prepared statement error
+const errorMessage = error instanceof Error ? error.message : String(error);
+if (errorMessage.includes('prepared statement') && errorMessage.includes('already exists')) {
+  // For prepared statement conflicts, try to reconnect
+  console.warn(`⚠️ Prepared statement conflict detected, attempt ${attempt}/${maxRetries}`);
+  try {
+    await this.prisma.$disconnect();
+    await this.prisma.$connect();
+    this.isConnected = true;
+  } catch (reconnectError) {
+    console.error('❌ Failed to reconnect after prepared statement error:', reconnectError);
+  }
+}
+```
+
+### 3. Updated Battle Crawler Producer
+
+**File**: `src/workers/battleCrawler/producer.ts`
+
+Updated to use the enhanced database manager with retry logic:
+
 ```typescript
 import { getPrisma, executeWithRetry } from '../../db/database.js';
 
@@ -50,7 +89,7 @@ async function upsertBattle(battle: BattleListItem) {
 }
 ```
 
-### 2. Enhanced Prisma Schema
+### 4. Enhanced Prisma Schema
 
 **File**: `prisma/schema.prisma`
 
@@ -69,7 +108,7 @@ datasource db {
 
 ### 1. Environment Variables
 
-Add these to your `.env` file:
+Add these to your Railway environment:
 
 ```bash
 # Database Connection Pool Configuration
@@ -78,22 +117,32 @@ DATABASE_POOL_MAX=10
 DATABASE_CONNECTION_TIMEOUT=30000
 DATABASE_IDLE_TIMEOUT=60000
 
-# For Railway or other poolers, you might need:
+# For Railway pooler compatibility
 DIRECT_URL="postgresql://username:password@host:port/database?schema=public"
 ```
 
-### 2. Regenerate Prisma Client
+### 2. Railway Pooler Configuration
+
+If using Railway, configure your pooler settings:
+
+```bash
+# Railway pooler settings
+POOL_MODE=transaction
+MAX_CLIENT_CONN=100
+DEFAULT_POOL_SIZE=10
+```
+
+### 3. Regenerate Prisma Client
 
 ```bash
 npx prisma generate
 ```
 
-### 3. Restart Your Services
+### 4. Restart Your Services
 
 ```bash
-# Stop your scheduler service
-# Then restart it
-yarn start:scheduler
+# Deploy to Railway
+# The scheduler service will automatically use the new configuration
 ```
 
 ## 🛠️ Alternative Solutions
@@ -119,7 +168,7 @@ const prisma = new PrismaClient({
 
 ### Option 2: Use Connection Pooler Settings
 
-If using Railway, configure your pooler settings:
+Configure your pooler to handle prepared statements better:
 
 ```bash
 # Railway pooler settings
@@ -145,7 +194,7 @@ After applying this fix:
 
 1. **✅ No more prepared statement errors**
 2. **✅ Better connection stability**
-3. **✅ Automatic retry logic for failed operations**
+3. **✅ Automatic reconnection on conflicts**
 4. **✅ Health monitoring and logging**
 5. **✅ Graceful handling of connection issues**
 
@@ -156,7 +205,7 @@ Monitor your logs for these patterns:
 ```
 ✅ Database connected successfully
 📊 Pool configuration: min=2, max=10
-⚠️ Database operation failed, attempt 1/3
+⚠️ Prepared statement conflict detected, attempt 1/3
 ✅ Database operation completed after retry
 ```
 
@@ -175,4 +224,4 @@ Monitor your logs for these patterns:
 
 ---
 
-**Note**: This fix specifically addresses the prepared statement error in your scheduler service. The core production services (kills, MMR, scheduler, notifier) now use the enhanced database manager with proper connection pooling support.
+**Note**: This fix specifically addresses both "prepared statement does not exist" and "prepared statement already exists" errors in your scheduler service. The enhanced database manager now handles connection pooling conflicts automatically with retry logic and reconnection strategies.

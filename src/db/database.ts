@@ -10,12 +10,43 @@ export class DatabaseManager {
   private lastHealthCheck: Date | null = null;
 
   private constructor() {
+    // Modify DATABASE_URL to work better with connection poolers
+    const databaseUrl = this.getPoolerCompatibleUrl();
+    
     this.prisma = new PrismaClient({
       log: process.env.NODE_ENV === 'development' ? ['query', 'error', 'warn'] : ['error'],
+      datasources: {
+        db: {
+          url: databaseUrl,
+        },
+      },
     });
 
     // Set up connection event handlers
     this.setupEventHandlers();
+  }
+
+  private getPoolerCompatibleUrl(): string {
+    const originalUrl = process.env.DATABASE_URL;
+    if (!originalUrl) {
+      throw new Error('DATABASE_URL environment variable is required');
+    }
+
+    // Add connection pooling parameters to the URL
+    const url = new URL(originalUrl);
+    
+    // Add parameters for better pooler compatibility
+    url.searchParams.set('connection_limit', '10');
+    url.searchParams.set('pool_timeout', '30');
+    url.searchParams.set('connect_timeout', '30');
+    
+    // For Railway and other poolers, add these parameters
+    if (url.hostname.includes('railway') || url.hostname.includes('pooler')) {
+      url.searchParams.set('pgbouncer', 'true');
+      url.searchParams.set('prepared_statements', 'false');
+    }
+
+    return url.toString();
   }
 
   public static getInstance(): DatabaseManager {
@@ -82,7 +113,8 @@ export class DatabaseManager {
 
   public async healthCheck(): Promise<boolean> {
     try {
-      await this.prisma.$queryRaw`SELECT 1`;
+      // Use a simple query that doesn't create prepared statements
+      await this.prisma.$executeRaw`SELECT 1`;
       this.isConnected = true;
       this.lastHealthCheck = new Date();
       this.connectionErrors = 0;
@@ -113,6 +145,20 @@ export class DatabaseManager {
         return await operation();
       } catch (error) {
         lastError = error as Error;
+        
+        // Check if it's a prepared statement error
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        if (errorMessage.includes('prepared statement') && errorMessage.includes('already exists')) {
+          // For prepared statement conflicts, try to reconnect
+          console.warn(`⚠️ Prepared statement conflict detected, attempt ${attempt}/${maxRetries}`);
+          try {
+            await this.prisma.$disconnect();
+            await this.prisma.$connect();
+            this.isConnected = true;
+          } catch (reconnectError) {
+            console.error('❌ Failed to reconnect after prepared statement error:', reconnectError);
+          }
+        }
         
         if (attempt === maxRetries) {
           console.error(`❌ Database operation failed after ${maxRetries} attempts:`, error);
