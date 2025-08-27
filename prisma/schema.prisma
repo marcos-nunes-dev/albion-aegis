@@ -257,6 +257,7 @@ model MmrCalculationJob {
   @@index([battleId])
   @@index([seasonId])
   @@index([status])
+  @@map("mmr_calculation_jobs")
 }
 
 // Enums

@@ -380,7 +380,12 @@ async function updateMmrJobStatus(battleId: bigint, status: MmrJobStatus): Promi
 
     // Update or create MMR calculation job record
     await prisma.mmrCalculationJob.upsert({
-      where: { battleId_seasonId: { battleId, seasonId: season.id } },
+      where: { 
+        battleId_seasonId: { 
+          battleId, 
+          seasonId: season.id 
+        } 
+      },
       update: { 
         status,
         updatedAt: new Date(),
