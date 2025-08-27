@@ -238,20 +238,73 @@ export class BattleAnalysisService {
       else if (battleData.guildsJson && typeof battleData.guildsJson === 'object') {
         // Convert guildsJson object to array format
         const guildsJson = battleData.guildsJson;
-        guildsData = Object.entries(guildsJson).map(([name, guildInfo]: [string, any]) => ({
-          name,
-          kills: guildInfo.Kills || 0,
-          deaths: guildInfo.Deaths || 0,
-          killFame: guildInfo.KillFame || 0,
-          players: guildInfo.Players || 0,
-          ip: guildInfo.IP || 1000
-        }));
-        console.log(`📊 [BATTLE-ANALYSIS] Using guilds from guildsJson: ${guildsData.length} guilds`);
+        
+        // Check if guildsJson is an array (from API response) or object (from database)
+        if (Array.isArray(guildsJson)) {
+          // The guildsJson contains corrupted data with numeric names, so we need to extract guild names from kills
+          console.log(`⚠️ [BATTLE-ANALYSIS] guildsJson contains corrupted data with numeric names, extracting from kills data`);
+          guildsData = [];
+        } else {
+          // Handle object format - extract guild names properly
+          guildsData = Object.entries(guildsJson).map(([key, guildInfo]: [string, any]) => {
+            // The key might be a number, so we need to get the actual guild name from the guildInfo
+            const guildName = guildInfo.name || guildInfo.Name || key;
+            return {
+              name: guildName,
+              kills: guildInfo.kills || guildInfo.Kills || 0,
+              deaths: guildInfo.deaths || guildInfo.Deaths || 0,
+              killFame: guildInfo.killFame || guildInfo.KillFame || 0,
+              players: guildInfo.players || guildInfo.Players || 0,
+              ip: guildInfo.ip || guildInfo.IP || 1000
+            };
+          });
+          console.log(`📊 [BATTLE-ANALYSIS] Using guilds from guildsJson object: ${guildsData.length} guilds`);
+        }
       }
       
+      // If no guilds found in battle data, extract from kills data as fallback
       if (guildsData.length === 0) {
-        console.log(`❌ [BATTLE-ANALYSIS] No guilds found in battle data`);
-        return [];
+        console.log(`⚠️ [BATTLE-ANALYSIS] No guilds found in battle data, extracting from kills data as fallback`);
+        
+        // Extract unique guild names from kills data
+        const guildNames = new Set<string>();
+        const guildKillStats = new Map<string, { kills: number; deaths: number; fameGained: number; fameLost: number }>();
+        
+        for (const kill of killsData) {
+          const killerGuild = this.extractGuildFromKill(kill, 'killer');
+          const victimGuild = this.extractGuildFromKill(kill, 'victim');
+          
+          if (killerGuild) {
+            guildNames.add(killerGuild);
+            const stats = guildKillStats.get(killerGuild) || { kills: 0, deaths: 0, fameGained: 0, fameLost: 0 };
+            stats.kills++;
+            stats.fameGained += kill.TotalVictimKillFame || 0;
+            guildKillStats.set(killerGuild, stats);
+          }
+          
+          if (victimGuild) {
+            guildNames.add(victimGuild);
+            const stats = guildKillStats.get(victimGuild) || { kills: 0, deaths: 0, fameGained: 0, fameLost: 0 };
+            stats.deaths++;
+            stats.fameLost += kill.TotalVictimKillFame || 0;
+            guildKillStats.set(victimGuild, stats);
+          }
+        }
+        
+        // Convert to guildsData format
+        guildsData = Array.from(guildNames).map(guildName => {
+          const stats = guildKillStats.get(guildName) || { kills: 0, deaths: 0, fameGained: 0, fameLost: 0 };
+          return {
+            name: guildName,
+            kills: stats.kills,
+            deaths: stats.deaths,
+            killFame: stats.fameGained,
+            players: 0, // We don't have player count from kills data
+            ip: 1000 // Default IP
+          };
+        });
+        
+        console.log(`📊 [BATTLE-ANALYSIS] Extracted ${guildsData.length} guilds from kills data:`, Array.from(guildNames));
       }
 
       // Process each guild from battle data
@@ -301,7 +354,7 @@ export class BattleAnalysisService {
         console.log(`📊 [BATTLE-ANALYSIS] Processed guild ${guild.name}: ${guildStat.kills} kills, ${guildStat.deaths} deaths, ${guildStat.fameGained} fame gained, ${guildStat.fameLost} fame lost, ${guildStat.players} players`);
       }
 
-      console.log(`✅ [BATTLE-ANALYSIS] Successfully processed ${guildStats.length} guilds from battle data`);
+      console.log(`✅ [BATTLE-ANALYSIS] Successfully processed ${guildStats.length} guilds from battle data`); 
       return guildStats;
 
     } catch (error) {
