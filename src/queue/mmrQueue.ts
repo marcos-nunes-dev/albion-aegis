@@ -187,6 +187,7 @@ async function processMmrCalculationJob(job: Job<MmrCalculationJobData>): Promis
   const battleId = BigInt(battleIdStr);
   
   try {
+    console.log(`🏆 [MMR-QUEUE] Starting MMR calculation job ${job.id} for battle ${battleId}`);
     logger.info('Processing MMR calculation job', {
       jobId: job.id,
       battleId: battleId.toString(),
@@ -194,28 +195,38 @@ async function processMmrCalculationJob(job: Job<MmrCalculationJobData>): Promis
     });
 
     // Update job status to processing
+    console.log(`🏆 [MMR-QUEUE] Updating job status to PROCESSING for battle ${battleId}`);
     await updateMmrJobStatus(battleId, 'PROCESSING');
 
     // Validate season exists
+    console.log(`🏆 [MMR-QUEUE] Validating season ${seasonId} for battle ${battleId}`);
     const season = await seasonService.getSeasonById(seasonId);
     if (!season) {
+      console.error(`❌ [MMR-QUEUE] Season not found: ${seasonId} for battle ${battleId}`);
       throw new Error(`Season not found: ${seasonId}`);
     }
+    console.log(`✅ [MMR-QUEUE] Season validated: ${season.name} (${season.id})`);
 
     // Ensure all guilds exist in database
+    console.log(`🏆 [MMR-QUEUE] Ensuring all guilds exist for battle ${battleId}`);
     for (const guildStat of guildStats) {
+      console.log(`🏆 [MMR-QUEUE] Creating/getting guild: ${guildStat.guildName}`);
       await guildService.getOrCreateGuild(guildStat.guildName);
     }
+    console.log(`✅ [MMR-QUEUE] All guilds ensured for battle ${battleId}`);
 
     // Get current MMR for all guilds
+    console.log(`🏆 [MMR-QUEUE] Getting current MMR for guilds in battle ${battleId}`);
     const guildStatsWithMmr = await Promise.all(
       guildStats.map(async (guildStat) => {
         const guild = await guildService.getGuildByName(guildStat.guildName);
         if (!guild) {
+          console.error(`❌ [MMR-QUEUE] Guild not found: ${guildStat.guildName} for battle ${battleId}`);
           throw new Error(`Guild not found: ${guildStat.guildName}`);
         }
 
         const currentMmr = await mmrService.getGuildSeasonMmr(guild.id, seasonId);
+        console.log(`📊 [MMR-QUEUE] Guild ${guildStat.guildName}: current MMR = ${currentMmr?.currentMmr ?? 1000.0}`);
         
         return {
           ...guildStat,
@@ -224,6 +235,7 @@ async function processMmrCalculationJob(job: Job<MmrCalculationJobData>): Promis
         };
       })
     );
+    console.log(`✅ [MMR-QUEUE] Got MMR data for ${guildStatsWithMmr.length} guilds in battle ${battleId}`);
 
     // Create battle analysis
     const battleAnalysis: BattleAnalysis = {
@@ -239,12 +251,16 @@ async function processMmrCalculationJob(job: Job<MmrCalculationJobData>): Promis
     };
 
     // Calculate MMR changes
+    console.log(`🏆 [MMR-QUEUE] Calculating MMR changes for battle ${battleId}`);
     const mmrChanges = await mmrService.calculateMmrForBattle(battleAnalysis);
+    console.log(`📊 [MMR-QUEUE] MMR changes calculated for battle ${battleId}:`, Object.fromEntries(mmrChanges));
 
     // Update MMR for each guild
+    console.log(`🏆 [MMR-QUEUE] Updating MMR for guilds in battle ${battleId}`);
     await Promise.all(
       guildStatsWithMmr.map(async (guildStat) => {
         const mmrChange = mmrChanges.get(guildStat.guildId) ?? 0;
+        console.log(`📊 [MMR-QUEUE] Updating guild ${guildStat.guildName}: MMR change = ${mmrChange}`);
         
         // Update guild season MMR
         await mmrService.updateGuildSeasonMmr(
@@ -256,10 +272,13 @@ async function processMmrCalculationJob(job: Job<MmrCalculationJobData>): Promis
         );
       })
     );
+    console.log(`✅ [MMR-QUEUE] Updated MMR for all guilds in battle ${battleId}`);
 
     // Update job status to completed
+    console.log(`🏆 [MMR-QUEUE] Updating job status to COMPLETED for battle ${battleId}`);
     await updateMmrJobStatus(battleId, 'COMPLETED');
 
+    console.log(`✅ [MMR-QUEUE] Successfully completed MMR calculation job ${job.id} for battle ${battleId}`);
     logger.info('Successfully processed MMR calculation job', {
       jobId: job.id,
       battleId: battleId.toString(),
@@ -267,6 +286,7 @@ async function processMmrCalculationJob(job: Job<MmrCalculationJobData>): Promis
     });
 
   } catch (error) {
+    console.error(`❌ [MMR-QUEUE] Error processing MMR calculation job ${job.id} for battle ${battleId}:`, error);
     logger.error('Error processing MMR calculation job', {
       jobId: job.id,
       battleId: battleId.toString(),
@@ -275,10 +295,12 @@ async function processMmrCalculationJob(job: Job<MmrCalculationJobData>): Promis
     });
 
     // Update job status to failed
+    console.log(`🏆 [MMR-QUEUE] Updating job status to FAILED for battle ${battleId}`);
     await updateMmrJobStatus(battleId, 'FAILED');
 
     // Apply fallback MMR change if this is the final retry
     if (job.attemptsMade >= job.opts.attempts! - 1) {
+      console.log(`🏆 [MMR-QUEUE] Applying fallback MMR change for battle ${battleId} (final retry)`);
       await applyFallbackMmrChange(battleId, seasonId, guildStats);
     }
 
@@ -346,12 +368,15 @@ async function processBatchMmrJob(job: Job<BatchMmrJobData>): Promise<void> {
  */
 async function updateMmrJobStatus(battleId: bigint, status: MmrJobStatus): Promise<void> {
   try {
+    console.log(`🏆 [JOB-STATUS] Updating MMR job status to ${status} for battle ${battleId}`);
+    
     // Get the active season for this battle
     const battle = await prisma.battle.findUnique({
       where: { albionId: battleId }
     });
     
     if (!battle) {
+      console.log(`❌ [JOB-STATUS] Battle ${battleId} not found for MMR job status update`);
       logger.warn('Battle not found for MMR job status update', {
         battleId: battleId.toString()
       });
@@ -371,12 +396,15 @@ async function updateMmrJobStatus(battleId: bigint, status: MmrJobStatus): Promi
     });
 
     if (!season) {
+      console.log(`❌ [JOB-STATUS] No season found for battle ${battleId} date: ${battle.startedAt}`);
       logger.warn('No season found for battle date', {
         battleId: battleId.toString(),
         battleDate: battle.startedAt
       });
       return;
     }
+
+    console.log(`📊 [JOB-STATUS] Found season: ${season.name} (${season.id}) for battle ${battleId}`);
 
     // Update or create MMR calculation job record
     await prisma.mmrCalculationJob.upsert({
@@ -401,6 +429,7 @@ async function updateMmrJobStatus(battleId: bigint, status: MmrJobStatus): Promi
       }
     });
 
+    console.log(`✅ [JOB-STATUS] Updated MMR job status to ${status} for battle ${battleId} (season: ${season.id})`);
     logger.info('Updated MMR job status', {
       battleId: battleId.toString(),
       seasonId: season.id,

@@ -26,6 +26,7 @@ export class BattleAnalysisService {
     killsData: any[]
   ): Promise<BattleAnalysis | null> {
     try {
+      console.log(`🏆 [BATTLE-ANALYSIS] Creating battle analysis for battle ${battleId}`);
       logger.info('Creating battle analysis', { battleId: battleId.toString() });
 
       // Extract basic battle information
@@ -34,9 +35,13 @@ export class BattleAnalysisService {
       const battleDuration = this.calculateBattleDuration(battleData, killsData);
       const battleDate = this.extractBattleDate(battleData);
 
+      console.log(`📊 [BATTLE-ANALYSIS] Battle ${battleId} stats: ${totalPlayers} players, ${totalFame} fame, ${battleDuration} min duration`);
+
       // Get active season for battle date
+      console.log(`🏆 [BATTLE-ANALYSIS] Getting season for battle date: ${battleDate}`);
       const season = await this.seasonService.getSeasonAtDate(battleDate);
       if (!season) {
+        console.log(`❌ [BATTLE-ANALYSIS] No active season found for battle ${battleId} date: ${battleDate}`);
         logger.warn('No active season found for battle date', {
           battleId: battleId.toString(),
           battleDate
@@ -44,8 +49,14 @@ export class BattleAnalysisService {
         return null;
       }
 
+      console.log(`✅ [BATTLE-ANALYSIS] Found active season: ${season.name} (${season.id})`);
+
       // Check if battle meets MMR criteria
-      if (!this.meetsMmrCriteria(totalPlayers, totalFame)) {
+      const meetsCriteria = this.meetsMmrCriteria(totalPlayers, totalFame);
+      console.log(`📋 [BATTLE-ANALYSIS] MMR criteria check for battle ${battleId}: ${meetsCriteria ? 'PASS' : 'FAIL'} (${totalPlayers} players, ${totalFame} fame)`);
+      
+      if (!meetsCriteria) {
+        console.log(`❌ [BATTLE-ANALYSIS] Battle ${battleId} does not meet MMR criteria`);
         logger.debug('Battle does not meet MMR criteria', {
           battleId: battleId.toString(),
           totalPlayers,
@@ -55,10 +66,14 @@ export class BattleAnalysisService {
       }
 
       // Extract guild statistics from kills data
+      console.log(`🏆 [BATTLE-ANALYSIS] Extracting guild stats for battle ${battleId}`);
       const guildStats = await this.extractGuildStats(battleId, killsData, battleData);
+
+      console.log(`📊 [BATTLE-ANALYSIS] Found ${guildStats.length} guilds in battle ${battleId}`);
 
       // Check if we have enough guilds for meaningful MMR calculation
       if (guildStats.length < 2) {
+        console.log(`❌ [BATTLE-ANALYSIS] Not enough guilds (${guildStats.length}) for MMR calculation in battle ${battleId}`);
         logger.debug('Not enough guilds for MMR calculation', {
           battleId: battleId.toString(),
           guildCount: guildStats.length
@@ -67,16 +82,24 @@ export class BattleAnalysisService {
       }
 
       // Calculate prime time status
+      console.log(`🏆 [BATTLE-ANALYSIS] Checking prime time status for battle ${battleId}`);
       const isPrimeTime = await this.seasonService.isPrimeTime(season.id, battleDate);
+      console.log(`📊 [BATTLE-ANALYSIS] Battle ${battleId} prime time: ${isPrimeTime}`);
 
       // Calculate kill clustering
+      console.log(`🏆 [BATTLE-ANALYSIS] Calculating kill clustering for battle ${battleId}`);
       const killClustering = this.calculateKillClustering(killsData);
+      console.log(`📊 [BATTLE-ANALYSIS] Battle ${battleId} kill clustering score: ${killClustering}`);
 
       // Detect friend groups
+      console.log(`🏆 [BATTLE-ANALYSIS] Detecting friend groups for battle ${battleId}`);
       const friendGroups = this.detectFriendGroups(guildStats, killsData);
+      console.log(`📊 [BATTLE-ANALYSIS] Battle ${battleId} friend groups: ${friendGroups.length}`);
 
       // Get current MMR for all guilds
+      console.log(`🏆 [BATTLE-ANALYSIS] Getting current MMR for guilds in battle ${battleId}`);
       const guildStatsWithMmr = await this.addCurrentMmrToGuildStats(guildStats, season.id);
+      console.log(`📊 [BATTLE-ANALYSIS] Added MMR data for ${guildStatsWithMmr.length} guilds in battle ${battleId}`);
 
       const battleAnalysis: BattleAnalysis = {
         battleId,
@@ -89,6 +112,15 @@ export class BattleAnalysisService {
         killClustering,
         friendGroups
       };
+
+      console.log(`✅ [BATTLE-ANALYSIS] Successfully created battle analysis for battle ${battleId}`);
+      console.log(`   - Season: ${season.name} (${season.id})`);
+      console.log(`   - Guilds: ${guildStatsWithMmr.length}`);
+      console.log(`   - Players: ${totalPlayers}`);
+      console.log(`   - Fame: ${totalFame}`);
+      console.log(`   - Prime time: ${isPrimeTime}`);
+      console.log(`   - Duration: ${battleDuration} min`);
+      console.log(`   - Kill clustering: ${killClustering}`);
 
       logger.info('Successfully created battle analysis', {
         battleId: battleId.toString(),

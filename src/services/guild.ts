@@ -17,21 +17,26 @@ export class GuildService {
    */
   async getOrCreateGuild(guildName: string): Promise<Guild> {
     try {
+      console.log(`🏆 [GUILD-SERVICE] Getting or creating guild: ${guildName}`);
+      
       // First, try to find the guild in our database
       const existingGuild = await this.prisma.guild.findUnique({
         where: { name: guildName }
       });
 
       if (existingGuild) {
+        console.log(`✅ [GUILD-SERVICE] Found existing guild: ${guildName} (ID: ${existingGuild.id})`);
         logger.debug('Found existing guild', { guildName, guildId: existingGuild.id });
         return existingGuild;
       }
 
       // Guild doesn't exist, fetch from AlbionBB API
+      console.log(`🏆 [GUILD-SERVICE] Guild ${guildName} not found, fetching from AlbionBB API`);
       logger.info('Guild not found in database, fetching from AlbionBB API', { guildName });
       const guildId = await this.fetchGuildId(guildName);
 
       if (!guildId) {
+        console.log(`⚠️ [GUILD-SERVICE] Could not find guild ID from AlbionBB API for: ${guildName}`);
         logger.warn('Could not find guild ID from AlbionBB API', { guildName });
         // Create guild with a placeholder ID (we'll update it later if we find the real ID)
         try {
@@ -41,6 +46,7 @@ export class GuildService {
               name: guildName
             }
           });
+          console.log(`✅ [GUILD-SERVICE] Created guild with placeholder ID: ${guildName} (ID: ${placeholderGuild.id})`);
           logger.info('Created guild with placeholder ID', { guildName, guildId: placeholderGuild.id });
           return placeholderGuild;
         } catch (createError) {
@@ -76,6 +82,7 @@ export class GuildService {
 
       // Create guild with the real ID
       try {
+        console.log(`🏆 [GUILD-SERVICE] Creating new guild with AlbionBB ID: ${guildName} (ID: ${guildId})`);
         const newGuild = await this.prisma.guild.create({
           data: {
             id: guildId,
@@ -83,6 +90,7 @@ export class GuildService {
           }
         });
 
+        console.log(`✅ [GUILD-SERVICE] Created new guild with AlbionBB ID: ${guildName} (ID: ${newGuild.id})`);
         logger.info('Created new guild with AlbionBB ID', { guildName, guildId: newGuild.id });
         return newGuild;
       } catch (createError) {

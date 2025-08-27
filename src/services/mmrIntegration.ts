@@ -24,11 +24,13 @@ export class MmrIntegrationService {
     killsData: any[]
   ): Promise<void> {
     try {
+      console.log(`🏆 [MMR-INTEGRATION] Starting MMR processing for battle ${battleId}`);
       logger.info('Processing battle for MMR calculation', {
         battleId: battleId.toString()
       });
 
       // Create battle analysis
+      console.log(`🏆 [MMR-INTEGRATION] Creating battle analysis for battle ${battleId}`);
       const battleAnalysis = await this.battleAnalysisService.createBattleAnalysis(
         battleId,
         battleData,
@@ -36,15 +38,24 @@ export class MmrIntegrationService {
       );
 
       if (!battleAnalysis) {
+        console.log(`❌ [MMR-INTEGRATION] Battle analysis not created, skipping MMR calculation for battle ${battleId}`);
         logger.debug('Battle analysis not created, skipping MMR calculation', {
           battleId: battleId.toString()
         });
         return;
       }
 
+      console.log(`✅ [MMR-INTEGRATION] Battle analysis created successfully for battle ${battleId}`);
+      console.log(`   - Guilds: ${battleAnalysis.guildStats.length}`);
+      console.log(`   - Players: ${battleAnalysis.totalPlayers}`);
+      console.log(`   - Fame: ${battleAnalysis.totalFame}`);
+      console.log(`   - Prime time: ${battleAnalysis.isPrimeTime}`);
+
       // Add MMR calculation job to queue
+      console.log(`🏆 [MMR-INTEGRATION] Adding MMR calculation job to queue for battle ${battleId}`);
       await addMmrCalculationJob(battleAnalysis);
 
+      console.log(`✅ [MMR-INTEGRATION] Successfully queued battle ${battleId} for MMR calculation`);
       logger.info('Successfully queued battle for MMR calculation', {
         battleId: battleId.toString(),
         guildCount: battleAnalysis.guildStats.length,
@@ -53,6 +64,7 @@ export class MmrIntegrationService {
       });
 
     } catch (error) {
+      console.error(`❌ [MMR-INTEGRATION] Error processing battle ${battleId} for MMR:`, error);
       logger.error('Error processing battle for MMR', {
         battleId: battleId.toString(),
         error: error instanceof Error ? error.message : 'Unknown error'

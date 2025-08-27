@@ -56,9 +56,11 @@ export function createKillsFetcherWorker(): Worker {
         
         // Process battle for MMR calculation
         try {
+          console.log(`🏆 [${jobId}] Starting MMR processing for battle ${albionId}`);
           await processBattleForMmr(albionId, killEvents);
+          console.log(`✅ [${jobId}] MMR processing completed for battle ${albionId}`);
         } catch (error) {
-          console.error(`⚠️ [${jobId}] MMR processing failed for battle ${albionId}:`, error);
+          console.error(`❌ [${jobId}] MMR processing failed for battle ${albionId}:`, error);
           // Don't throw - MMR processing failure shouldn't fail the kills job
         }
         
@@ -169,15 +171,19 @@ async function upsertKillEvent(killEvent: KillEvent, battleAlbionId: string) {
  */
 async function processBattleForMmr(albionId: string, killEvents: KillEvent[]): Promise<void> {
   try {
+    console.log(`🏆 [KILLS-WORKER] Processing battle ${albionId} for MMR calculation`);
+    
     // Get battle data from database
     const battle = await prisma.battle.findUnique({
       where: { albionId: BigInt(albionId) }
     });
     
     if (!battle) {
-      console.log(`⚠️ Battle ${albionId} not found for MMR processing`);
+      console.log(`❌ [KILLS-WORKER] Battle ${albionId} not found for MMR processing`);
       return;
     }
+    
+    console.log(`📊 [KILLS-WORKER] Found battle ${albionId}: ${battle.totalPlayers} players, ${battle.totalFame} fame`);
     
     // Initialize MMR integration service
     const mmrIntegration = new MmrIntegrationService(prisma);
@@ -189,9 +195,9 @@ async function processBattleForMmr(albionId: string, killEvents: KillEvent[]): P
       killEvents
     );
     
-    console.log(`🏆 MMR processing queued for battle ${albionId}`);
+    console.log(`✅ [KILLS-WORKER] MMR processing queued for battle ${albionId}`);
   } catch (error) {
-    console.error(`❌ MMR processing failed for battle ${albionId}:`, error);
+    console.error(`❌ [KILLS-WORKER] MMR processing failed for battle ${albionId}:`, error);
     throw error;
   }
 }
