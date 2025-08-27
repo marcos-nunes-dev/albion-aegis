@@ -155,6 +155,7 @@ model Season {
   // Relations
   guildSeasons GuildSeason[]
   mmrCalculationJobs MmrCalculationJob[]
+  mmrCalculationLogs MmrCalculationLog[]
 
   @@index([isActive])
   @@index([startDate])
@@ -169,6 +170,7 @@ model Guild {
 
   // Relations
   guildSeasons GuildSeason[]
+  mmrCalculationLogs MmrCalculationLog[]
 
   @@index([name])
 }
@@ -254,12 +256,95 @@ model MmrCalculationJob {
 
   // Relations
   season      Season   @relation(fields: [seasonId], references: [id], onDelete: Cascade)
+  mmrCalculationLogs MmrCalculationLog[]
 
   @@unique([battleId, seasonId])
   @@index([battleId])
   @@index([seasonId])
   @@index([status])
   @@map("mmr_calculation_jobs")
+}
+
+// Detailed MMR calculation tracking for each guild in each battle
+model MmrCalculationLog {
+  id                    String   @id @default(cuid())
+  battleId              BigInt
+  seasonId              String
+  guildId               String
+  guildName             String   @db.VarChar(64)
+  
+  // MMR values
+  previousMmr           Float    // MMR before the battle
+  mmrChange             Float    // MMR change for this battle
+  newMmr                Float    // MMR after the battle
+  
+  // Battle statistics
+  kills                 Int      @default(0)
+  deaths                Int      @default(0)
+  fameGained            BigInt   @default(0)
+  fameLost              BigInt   @default(0)
+  players               Int      @default(0)
+  avgIP                 Float    @default(0.0)
+  isPrimeTime           Boolean  @default(false)
+  
+  // Battle context
+  totalBattlePlayers    Int      @default(0)
+  totalBattleFame       BigInt   @default(0)
+  battleDuration        Int      @default(0) // in minutes
+  killClustering        Float    @default(0.0)
+  
+  // MMR calculation factors (detailed breakdown)
+  winLossFactor         Float    @default(0.0)
+  fameFactor            Float    @default(0.0)
+  playerCountFactor     Float    @default(0.0)
+  ipFactor              Float    @default(0.0)
+  battleSizeFactor      Float    @default(0.0)
+  kdFactor              Float    @default(0.0)
+  durationFactor        Float    @default(0.0)
+  clusteringFactor      Float    @default(0.0)
+  opponentStrengthFactor Float   @default(0.0)
+  
+  // Weighted contributions
+  winLossContribution   Float    @default(0.0)
+  fameContribution      Float    @default(0.0)
+  playerCountContribution Float  @default(0.0)
+  ipContribution        Float    @default(0.0)
+  battleSizeContribution Float   @default(0.0)
+  kdContribution        Float    @default(0.0)
+  durationContribution  Float    @default(0.0)
+  clusteringContribution Float   @default(0.0)
+  opponentStrengthContribution Float @default(0.0)
+  
+  // Final calculation
+  totalWeightedScore    Float    @default(0.0)
+  kFactorApplied        Float    @default(0.0)
+  
+  // Additional context
+  isWin                 Boolean  @default(false)
+  hasSignificantParticipation Boolean @default(false)
+  allianceName          String?  @db.VarChar(16)
+  opponentGuilds        String[] // Array of opponent guild names
+  opponentMmrs          Float[]  // Array of opponent MMRs
+  
+  // Metadata
+  calculationVersion    String   @default("1.0") // For algorithm versioning
+  processedAt           DateTime @default(now())
+  
+  // Relations
+  season                Season   @relation(fields: [seasonId], references: [id], onDelete: Cascade)
+  guild                 Guild    @relation(fields: [guildId], references: [id], onDelete: Cascade)
+  mmrCalculationJob     MmrCalculationJob? @relation(fields: [battleId, seasonId], references: [battleId, seasonId], onDelete: Cascade)
+
+  @@unique([battleId, seasonId, guildId])
+  @@index([battleId])
+  @@index([seasonId])
+  @@index([guildId])
+  @@index([guildName])
+  @@index([processedAt])
+  @@index([mmrChange])
+  @@index([isWin])
+  @@index([isPrimeTime])
+  @@map("mmr_calculation_logs")
 }
 
 // Enums

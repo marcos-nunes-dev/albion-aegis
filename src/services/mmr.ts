@@ -316,7 +316,7 @@ export class MmrService {
   }
 
   /**
-   * Update guild season MMR in database
+   * Update guild season MMR in database with detailed logging
    */
   async updateGuildSeasonMmr(
     guildId: string, 
@@ -379,6 +379,18 @@ export class MmrService {
         }
       });
       console.log(`✅ [GUILD-SEASON] Updated guild season record for guild ${battleStats.guildName} (new MMR: ${newMmr})`);
+
+      // Log detailed MMR calculation information
+      await this.logMmrCalculation(
+        guildId,
+        seasonId,
+        guildSeason.currentMmr,
+        mmrChange,
+        newMmr,
+        battleStats,
+        battleAnalysis,
+        isWin
+      );
 
       // Update prime time mass if this is a prime time battle
       if (battleStats.isPrimeTime) {
@@ -713,6 +725,157 @@ export class MmrService {
         error: error instanceof Error ? error.message : 'Unknown error' 
       });
       throw error;
+    }
+  }
+
+  /**
+   * Log detailed MMR calculation information to database
+   */
+  private async logMmrCalculation(
+    guildId: string,
+    seasonId: string,
+    previousMmr: number,
+    mmrChange: number,
+    newMmr: number,
+    battleStats: GuildBattleStats,
+    battleAnalysis: BattleAnalysis,
+    isWin: boolean
+  ): Promise<void> {
+    try {
+      // Calculate all the individual factors for detailed logging
+      const winLossFactor = this.calculateWinLossFactor(battleStats, battleAnalysis);
+      const fameFactor = this.calculateFameFactor(battleStats, battleAnalysis);
+      const playerCountFactor = this.calculatePlayerCountFactor(battleStats, battleAnalysis);
+      const ipFactor = this.calculateIpFactor(battleStats, battleAnalysis);
+      const battleSizeFactor = this.calculateBattleSizeFactor(battleAnalysis);
+      const kdFactor = this.calculateKdFactor(battleStats);
+      const durationFactor = this.calculateDurationFactor(battleAnalysis);
+      const clusteringFactor = this.calculateClusteringFactor(battleAnalysis);
+
+      // Calculate weighted contributions
+      const winLossContribution = winLossFactor * MMR_CONSTANTS.WIN_LOSS_WEIGHT;
+      const fameContribution = fameFactor * MMR_CONSTANTS.FAME_WEIGHT;
+      const playerCountContribution = playerCountFactor * MMR_CONSTANTS.PLAYER_COUNT_WEIGHT;
+      const ipContribution = ipFactor * MMR_CONSTANTS.IP_WEIGHT;
+      const battleSizeContribution = battleSizeFactor * MMR_CONSTANTS.BATTLE_SIZE_WEIGHT;
+      const kdContribution = kdFactor * MMR_CONSTANTS.KD_RATIO_WEIGHT;
+      const durationContribution = durationFactor * MMR_CONSTANTS.BATTLE_DURATION_WEIGHT;
+      const clusteringContribution = clusteringFactor * MMR_CONSTANTS.KILL_CLUSTERING_WEIGHT;
+
+      // Calculate total weighted score
+      const totalWeightedScore = winLossContribution + fameContribution + playerCountContribution + 
+                                ipContribution + battleSizeContribution + kdContribution + 
+                                durationContribution + clusteringContribution;
+
+      // Get opponent information
+      const opponentGuilds = battleAnalysis.guildStats
+        .filter(g => g.guildId !== guildId)
+        .map(g => g.guildName);
+      
+      const opponentMmrs = battleAnalysis.guildStats
+        .filter(g => g.guildId !== guildId)
+        .map(g => g.currentMmr);
+
+      // Get alliance information
+      const allianceName = battleAnalysis.guildAlliances?.get(battleStats.guildName) || null;
+
+      // Check significant participation
+      const hasSignificantParticipation = MmrService.hasSignificantParticipation(battleStats, battleAnalysis);
+
+      // Create MMR calculation log entry
+      await this.prisma.mmrCalculationLog.create({
+        data: {
+          battleId: battleAnalysis.battleId,
+          seasonId,
+          guildId,
+          guildName: battleStats.guildName,
+          
+          // MMR values
+          previousMmr,
+          mmrChange,
+          newMmr,
+          
+          // Battle statistics
+          kills: battleStats.kills,
+          deaths: battleStats.deaths,
+          fameGained: BigInt(battleStats.fameGained),
+          fameLost: BigInt(battleStats.fameLost),
+          players: battleStats.players,
+          avgIP: battleStats.avgIP,
+          isPrimeTime: battleStats.isPrimeTime,
+          
+          // Battle context
+          totalBattlePlayers: battleAnalysis.totalPlayers,
+          totalBattleFame: BigInt(battleAnalysis.totalFame),
+          battleDuration: battleAnalysis.battleDuration,
+          killClustering: battleAnalysis.killClustering,
+          
+          // MMR calculation factors
+          winLossFactor,
+          fameFactor,
+          playerCountFactor,
+          ipFactor,
+          battleSizeFactor,
+          kdFactor,
+          durationFactor,
+          clusteringFactor,
+          opponentStrengthFactor: 1.0, // Default, will be calculated if needed
+          
+          // Weighted contributions
+          winLossContribution,
+          fameContribution,
+          playerCountContribution,
+          ipContribution,
+          battleSizeContribution,
+          kdContribution,
+          durationContribution,
+          clusteringContribution,
+          opponentStrengthContribution: 0.0, // Will be calculated if needed
+          
+          // Final calculation
+          totalWeightedScore,
+          kFactorApplied: MMR_CONSTANTS.K_FACTOR,
+          
+          // Additional context
+          isWin,
+          hasSignificantParticipation,
+          allianceName,
+          opponentGuilds,
+          opponentMmrs,
+          
+          // Metadata
+          calculationVersion: "1.0"
+        }
+      });
+
+      console.log(`📊 [MMR-LOG] Logged detailed MMR calculation for guild ${battleStats.guildName}`);
+      console.log(`   - Factors: Win/Loss=${winLossFactor.toFixed(3)}, Fame=${fameFactor.toFixed(3)}, Players=${playerCountFactor.toFixed(3)}`);
+      console.log(`   - Contributions: Win/Loss=${winLossContribution.toFixed(3)}, Fame=${fameContribution.toFixed(3)}`);
+      console.log(`   - Total Score: ${totalWeightedScore.toFixed(3)}, Final Change: ${mmrChange.toFixed(3)}`);
+
+      logger.debug('Logged MMR calculation details', {
+        guildId,
+        battleId: battleAnalysis.battleId.toString(),
+        mmrChange,
+        factors: {
+          winLoss: winLossFactor,
+          fame: fameFactor,
+          playerCount: playerCountFactor,
+          ip: ipFactor,
+          battleSize: battleSizeFactor,
+          kd: kdFactor,
+          duration: durationFactor,
+          clustering: clusteringFactor
+        }
+      });
+
+    } catch (error) {
+      logger.error('Error logging MMR calculation details', {
+        guildId,
+        battleId: battleAnalysis.battleId.toString(),
+        error: error instanceof Error ? error.message : 'Unknown error'
+      });
+      // Don't throw - logging failure shouldn't fail the MMR update
     }
   }
 
