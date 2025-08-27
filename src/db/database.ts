@@ -30,26 +30,27 @@ export class DatabaseManager {
   }
 
   private setupEventHandlers() {
-    this.prisma.$on('query', (e) => {
+    // Type assertion to handle Prisma's strict event typing
+    (this.prisma as any).$on('query', (e: any) => {
       if (process.env.NODE_ENV === 'development') {
         console.log(`🔍 Query: ${e.query}`);
         console.log(`⏱️  Duration: ${e.duration}ms`);
       }
     });
 
-    this.prisma.$on('error', (e) => {
+    (this.prisma as any).$on('error', (e: any) => {
       console.error('❌ Prisma error:', e);
       this.connectionErrors++;
       this.isConnected = false;
     });
 
-    this.prisma.$on('info', (e) => {
+    (this.prisma as any).$on('info', (e: any) => {
       if (process.env.NODE_ENV === 'development') {
         console.log(`ℹ️  Prisma info: ${e.message}`);
       }
     });
 
-    this.prisma.$on('warn', (e) => {
+    (this.prisma as any).$on('warn', (e: any) => {
       console.warn(`⚠️  Prisma warning: ${e.message}`);
     });
   }
