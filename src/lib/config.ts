@@ -42,6 +42,12 @@ const configSchema = z.object({
   
   // Battle Notifier Configuration
   BATTLE_NOTIFIER_CONCURRENCY: z.coerce.number().positive().default(2),
+
+  // Database Pool Configuration
+  DATABASE_POOL_MIN: z.coerce.number().positive().default(1),
+  DATABASE_POOL_MAX: z.coerce.number().positive().default(10),
+  DATABASE_CONNECTION_TIMEOUT: z.coerce.number().positive().default(30000),
+  DATABASE_IDLE_TIMEOUT: z.coerce.number().positive().default(60000),
 });
 
 // Parse and validate the configuration
@@ -85,6 +91,10 @@ export const getConfigSummary = () => ({
   DEBOUNCE_KILLS_MIN: config.DEBOUNCE_KILLS_MIN,
   RECHECK_DONE_BATTLE_HOURS: config.RECHECK_DONE_BATTLE_HOURS,
   BATTLE_NOTIFIER_CONCURRENCY: config.BATTLE_NOTIFIER_CONCURRENCY,
+  DATABASE_POOL_MIN: config.DATABASE_POOL_MIN,
+  DATABASE_POOL_MAX: config.DATABASE_POOL_MAX,
+  DATABASE_CONNECTION_TIMEOUT: config.DATABASE_CONNECTION_TIMEOUT,
+  DATABASE_IDLE_TIMEOUT: config.DATABASE_IDLE_TIMEOUT,
   DATABASE_URL: config.DATABASE_URL ? '[SET]' : '[NOT SET]',
   REDIS_URL: config.REDIS_URL ? '[SET]' : '[NOT SET]',
 });

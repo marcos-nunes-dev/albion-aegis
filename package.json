@@ -21,6 +21,7 @@
     "tracking:delete": "tsx apps/manage-tracking.ts delete",
     "crawl:once": "tsx apps/dev-once.ts",
     "backfill": "tsx apps/backfill.ts",
+    "db:health": "tsx apps/db-health-check.ts",
     "railway:setup": "bash scripts/railway-setup.sh",
     "railway:deploy": "railway up",
     "railway:logs": "railway logs",

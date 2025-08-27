@@ -1,6 +1,6 @@
 import { Worker } from 'bullmq';
 import { getKillsForBattle } from '../../http/client.js';
-import { prisma } from '../../db/prisma.js';
+import { getPrisma, executeWithRetry } from '../../db/database.js';
 import { killsFetchQueue } from '../../queue/queues.js';
 import { config } from '../../lib/config.js';
 import type { KillEvent } from '../../types/albion.js';
@@ -116,139 +116,112 @@ export function createKillsFetcherWorker(): Worker {
 }
 
 /**
- * Upsert a kill event to the database
+ * Upsert a kill event to the database with connection pooling and retry logic
  */
 async function upsertKillEvent(killEvent: KillEvent, battleAlbionId: string) {
-  const existingKillEvent = await prisma.killEvent.findUnique({
-    where: { EventId: killEvent.EventId }
+  return executeWithRetry(async () => {
+    const prisma = getPrisma();
+    
+    const existingKillEvent = await prisma.killEvent.findUnique({
+      where: { EventId: killEvent.EventId }
+    });
+    
+    const killEventData = {
+      EventId: killEvent.EventId,
+      TimeStamp: new Date(killEvent.TimeStamp),
+      TotalVictimKillFame: killEvent.TotalVictimKillFame,
+      battleAlbionId: BigInt(battleAlbionId),
+      
+      // Killer information
+      killerId: killEvent.Killer.Id,
+      killerName: killEvent.Killer.Name,
+      killerGuild: killEvent.Killer.GuildName || null,
+      killerAlliance: killEvent.Killer.AllianceName || null,
+      killerAvgIP: killEvent.Killer.AverageItemPower,
+      killerEquipment: killEvent.Killer.Equipment ? JSON.parse(JSON.stringify(killEvent.Killer.Equipment)) : null,
+
+      // Victim information
+      victimId: killEvent.Victim.Id,
+      victimName: killEvent.Victim.Name,
+      victimGuild: killEvent.Victim.GuildName || null,
+      victimAlliance: killEvent.Victim.AllianceName || null,
+      victimAvgIP: killEvent.Victim.AverageItemPower,
+      victimEquipment: killEvent.Victim.Equipment ? JSON.parse(JSON.stringify(killEvent.Victim.Equipment)) : null,
+    };
+    
+    if (existingKillEvent) {
+      // Update existing kill event
+      const updatedKillEvent = await prisma.killEvent.update({
+        where: { EventId: killEvent.EventId },
+        data: killEventData
+      });
+      
+      return { killEvent: updatedKillEvent, wasCreated: false };
+    } else {
+      // Create new kill event
+      const newKillEvent = await prisma.killEvent.create({
+        data: killEventData
+      });
+      
+      return { killEvent: newKillEvent, wasCreated: true };
+    }
   });
-  
-  const killEventData = {
-    EventId: killEvent.EventId,
-    TimeStamp: new Date(killEvent.TimeStamp),
-    TotalVictimKillFame: killEvent.TotalVictimKillFame,
-    battleAlbionId: BigInt(battleAlbionId),
-    
-    // Killer information
-    killerId: killEvent.Killer.Id,
-    killerName: killEvent.Killer.Name,
-    killerGuild: killEvent.Killer.GuildName || null,
-    killerAlliance: killEvent.Killer.AllianceName || null,
-    killerAvgIP: killEvent.Killer.AverageItemPower,
-    killerEquipment: killEvent.Killer.Equipment ? JSON.parse(JSON.stringify(killEvent.Killer.Equipment)) : null,
-    
-    // Victim information
-    victimId: killEvent.Victim.Id,
-    victimName: killEvent.Victim.Name,
-    victimGuild: killEvent.Victim.GuildName || null,
-    victimAlliance: killEvent.Victim.AllianceName || null,
-    victimAvgIP: killEvent.Victim.AverageItemPower,
-    victimEquipment: killEvent.Victim.Equipment ? JSON.parse(JSON.stringify(killEvent.Victim.Equipment)) : null,
-    
-    ingestedAt: new Date(),
-  };
-  
-  if (existingKillEvent) {
-    // Update existing kill event
-    const updatedKillEvent = await prisma.killEvent.update({
-      where: { EventId: killEvent.EventId },
-      data: killEventData
-    });
-    
-    return { killEvent: updatedKillEvent, wasCreated: false };
-  } else {
-    // Create new kill event
-    const newKillEvent = await prisma.killEvent.create({
-      data: killEventData
-    });
-    
-    return { killEvent: newKillEvent, wasCreated: true };
-  }
 }
 
 /**
- * Process battle for MMR calculation with retry logic
+ * Process battle for MMR calculation with retry logic and connection pooling
  */
 async function processBattleForMmr(albionId: string, killEvents: KillEvent[]): Promise<void> {
-  const maxRetries = 3;
-  const retryDelay = 1000; // 1 second
-
-  for (let attempt = 1; attempt <= maxRetries; attempt++) {
-    try {
-      console.log(`🏆 [KILLS-WORKER] Processing battle ${albionId} for MMR calculation (attempt ${attempt}/${maxRetries})`);
-      
-      // Get battle data from database
-      const battle = await prisma.battle.findUnique({
-        where: { albionId: BigInt(albionId) }
-      });
-      
-      if (!battle) {
-        console.log(`❌ [KILLS-WORKER] Battle ${albionId} not found for MMR processing`);
-        return;
-      }
-      
-      console.log(`📊 [KILLS-WORKER] Found battle ${albionId}: ${battle.totalPlayers} players, ${battle.totalFame} fame`);
-      
-      // Initialize MMR integration service
-      const mmrIntegration = new MmrIntegrationService(prisma);
-      
-      // Process battle for MMR
-      await mmrIntegration.processBattleForMmr(
-        BigInt(albionId),
-        battle,
-        killEvents
-      );
-      
-      console.log(`✅ [KILLS-WORKER] MMR processing queued for battle ${albionId}`);
-      return; // Success, exit retry loop
-    } catch (error) {
-      if (attempt === maxRetries) {
-        console.error(`❌ [KILLS-WORKER] MMR processing failed for battle ${albionId} after ${maxRetries} attempts:`, error);
-        throw error;
-      }
-      
-      console.warn(`⚠️ [KILLS-WORKER] MMR processing failed for battle ${albionId}, attempt ${attempt}/${maxRetries}:`, error);
-      
-      // Wait before retrying
-      await new Promise(resolve => setTimeout(resolve, retryDelay * attempt));
+  return executeWithRetry(async () => {
+    console.log(`🏆 [KILLS-WORKER] Processing battle ${albionId} for MMR calculation`);
+    
+    const prisma = getPrisma();
+    
+    // Get battle data from database
+    const battle = await prisma.battle.findUnique({
+      where: { albionId: BigInt(albionId) }
+    });
+    
+    if (!battle) {
+      console.log(`❌ [KILLS-WORKER] Battle ${albionId} not found for MMR processing`);
+      return;
     }
-  }
+    
+    console.log(`📊 [KILLS-WORKER] Found battle ${albionId}: ${battle.totalPlayers} players, ${battle.totalFame} fame`);
+    
+    // Initialize MMR integration service
+    const mmrIntegration = new MmrIntegrationService(prisma);
+    
+    // Process battle for MMR
+    await mmrIntegration.processBattleForMmr(
+      BigInt(albionId),
+      battle,
+      killEvents
+    );
+    
+    console.log(`✅ [KILLS-WORKER] MMR processing queued for battle ${albionId}`);
+  });
 }
 
 /**
- * Mark a battle as having kills fetched with retry logic
+ * Mark a battle as having kills fetched with retry logic and connection pooling
  */
 async function markBattleKillsFetched(albionId: string): Promise<void> {
-  const maxRetries = 3;
-  const retryDelay = 1000; // 1 second
-
-  for (let attempt = 1; attempt <= maxRetries; attempt++) {
-    try {
-      await prisma.battle.update({
-        where: { albionId: BigInt(albionId) },
-        data: { killsFetchedAt: new Date() }
-      });
-      return; // Success, exit retry loop
-    } catch (error) {
-      if (attempt === maxRetries) {
-        console.error(`❌ Failed to mark battle ${albionId} as kills fetched after ${maxRetries} attempts:`, error);
-        // Don't throw - this is not critical for the main job
-        return;
-      }
-      
-      console.warn(`⚠️ Failed to mark battle ${albionId} as kills fetched, attempt ${attempt}/${maxRetries}:`, error);
-      
-      // Wait before retrying
-      await new Promise(resolve => setTimeout(resolve, retryDelay * attempt));
-    }
-  }
+  return executeWithRetry(async () => {
+    const prisma = getPrisma();
+    
+    await prisma.battle.update({
+      where: { albionId: BigInt(albionId) },
+      data: { killsFetchedAt: new Date() }
+    });
+  });
 }
 
 /**
  * Start the kills fetcher worker
  */
 export function startKillsFetcherWorker(): Worker {
-  console.log(`🔪 Starting kills fetcher worker with concurrency: ${config.KILLS_WORKER_CONCURRENCY}`);
+  console.log('🔪 Starting kills fetcher worker with enhanced database connection pooling...');
   
   const worker = createKillsFetcherWorker();
   

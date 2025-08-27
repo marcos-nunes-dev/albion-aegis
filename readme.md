@@ -69,6 +69,7 @@ yarn manage-mmr top-guilds 100
 
 - **[MMR Integration Guide](./MMR_INTEGRATION_GUIDE.md)**: Complete MMR system documentation
 - **[Railway Deployment Guide](./RAILWAY_DEPLOYMENT_GUIDE.md)**: Production deployment instructions
+- **[Database Connection Guide](./DATABASE_CONNECTION_GUIDE.md)**: Connection pooling and database optimization
 - **[API Documentation](./docs/api.md)**: API endpoints and usage
 
 ## 🏗️ System Architecture
@@ -222,6 +223,12 @@ yarn build
 # Database
 DATABASE_URL="postgresql://username:password@host:port/database"
 
+# Database Connection Pool Configuration
+DATABASE_POOL_MIN=2
+DATABASE_POOL_MAX=10
+DATABASE_CONNECTION_TIMEOUT=30000
+DATABASE_IDLE_TIMEOUT=60000
+
 # Redis
 REDIS_URL="redis://username:password@host:port"
 
@@ -245,6 +252,9 @@ yarn tsx apps/mmr-worker.ts
 
 # Run management commands
 yarn tsx apps/manage-mmr.ts <command>
+
+# Database health check
+yarn db:health
 
 # Run tests
 yarn test
