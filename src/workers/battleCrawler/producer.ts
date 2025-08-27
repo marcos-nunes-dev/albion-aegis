@@ -1,5 +1,5 @@
 import { getBattlesPage } from '../../http/client.js';
-import { prisma } from '../../db/prisma.js';
+import { getPrisma, executeWithRetry } from '../../db/database.js';
 import { killsFetchQueue } from '../../queue/queues.js';
 import { setWatermark } from '../../services/watermark.js';
 import { config } from '../../lib/config.js';
@@ -158,40 +158,43 @@ export async function runBattleCrawl(): Promise<void> {
  * Upsert a battle to the database
  */
 async function upsertBattle(battle: BattleListItem) {
-  const existingBattle = await prisma.battle.findUnique({
-    where: { albionId: battle.albionId }
+  return await executeWithRetry(async () => {
+    const prisma = getPrisma();
+    const existingBattle = await prisma.battle.findUnique({
+      where: { albionId: battle.albionId }
+    });
+    
+    const battleData = {
+      albionId: battle.albionId,
+      startedAt: new Date(battle.startedAt),
+      totalFame: battle.totalFame,
+      totalKills: battle.totalKills,
+      totalPlayers: battle.totalPlayers,
+      alliancesJson: battle.alliances,
+      guildsJson: battle.guilds,
+      ingestedAt: new Date(),
+    };
+    
+    if (existingBattle) {
+      // Update existing battle
+      const updatedBattle = await prisma.battle.update({
+        where: { albionId: battle.albionId },
+        data: battleData
+      });
+      
+      return { battle: updatedBattle, wasCreated: false };
+    } else {
+      // Create new battle
+      const newBattle = await prisma.battle.create({
+        data: battleData
+      });
+      
+      // Record metrics for new battle
+      metrics.recordBattleUpsert();
+      
+      return { battle: newBattle, wasCreated: true };
+    }
   });
-  
-  const battleData = {
-    albionId: battle.albionId,
-    startedAt: new Date(battle.startedAt),
-    totalFame: battle.totalFame,
-    totalKills: battle.totalKills,
-    totalPlayers: battle.totalPlayers,
-    alliancesJson: battle.alliances,
-    guildsJson: battle.guilds,
-    ingestedAt: new Date(),
-  };
-  
-     if (existingBattle) {
-     // Update existing battle
-     const updatedBattle = await prisma.battle.update({
-       where: { albionId: battle.albionId },
-       data: battleData
-     });
-     
-     return { battle: updatedBattle, wasCreated: false };
-   } else {
-     // Create new battle
-     const newBattle = await prisma.battle.create({
-       data: battleData
-     });
-     
-     // Record metrics for new battle
-     metrics.recordBattleUpsert();
-     
-     return { battle: newBattle, wasCreated: true };
-   }
 }
 
 /**
