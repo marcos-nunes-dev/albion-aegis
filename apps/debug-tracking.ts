@@ -1,9 +1,8 @@
-import { PrismaClient } from '@prisma/client';
 import { log } from '../src/log.js';
+import { prisma } from '../src/db/prisma.js';
 
 
 const logger = log.child({ component: 'debug-tracking' });
-const prisma = new PrismaClient();
 
 async function debugTracking() {
   try {

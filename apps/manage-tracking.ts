@@ -1,12 +1,11 @@
 #!/usr/bin/env tsx
 
-import { PrismaClient } from '@prisma/client';
+import { prisma } from '../src/db/prisma.js';
 import { TrackingService } from '../src/services/tracking.js';
 import { DiscordWebhookService } from '../src/services/discord.js';
 import { log } from '../src/log.js';
 
 const logger = log.child({ component: 'manage-tracking' });
-const prisma = new PrismaClient();
 const trackingService = new TrackingService(prisma);
 
 // CLI argument parsing

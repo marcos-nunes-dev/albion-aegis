@@ -2,11 +2,9 @@
 import { config } from '../src/lib/config.js';
 import { log } from '../src/log.js';
 import redis from '../src/queue/connection.js';
-import { PrismaClient } from '@prisma/client';
 import { getBattlesPage } from '../src/http/client.js';
+import { prisma } from '../src/db/prisma.js';
 // import { getWatermark } from '../src/services/watermark.js';
-
-const prisma = new PrismaClient();
 const logger = log.child({ component: 'deep-sweep-nightly' });
 
 // Deep sweep configuration

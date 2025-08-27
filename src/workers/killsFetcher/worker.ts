@@ -167,53 +167,80 @@ async function upsertKillEvent(killEvent: KillEvent, battleAlbionId: string) {
 }
 
 /**
- * Process battle for MMR calculation
+ * Process battle for MMR calculation with retry logic
  */
 async function processBattleForMmr(albionId: string, killEvents: KillEvent[]): Promise<void> {
-  try {
-    console.log(`🏆 [KILLS-WORKER] Processing battle ${albionId} for MMR calculation`);
-    
-    // Get battle data from database
-    const battle = await prisma.battle.findUnique({
-      where: { albionId: BigInt(albionId) }
-    });
-    
-    if (!battle) {
-      console.log(`❌ [KILLS-WORKER] Battle ${albionId} not found for MMR processing`);
-      return;
+  const maxRetries = 3;
+  const retryDelay = 1000; // 1 second
+
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      console.log(`🏆 [KILLS-WORKER] Processing battle ${albionId} for MMR calculation (attempt ${attempt}/${maxRetries})`);
+      
+      // Get battle data from database
+      const battle = await prisma.battle.findUnique({
+        where: { albionId: BigInt(albionId) }
+      });
+      
+      if (!battle) {
+        console.log(`❌ [KILLS-WORKER] Battle ${albionId} not found for MMR processing`);
+        return;
+      }
+      
+      console.log(`📊 [KILLS-WORKER] Found battle ${albionId}: ${battle.totalPlayers} players, ${battle.totalFame} fame`);
+      
+      // Initialize MMR integration service
+      const mmrIntegration = new MmrIntegrationService(prisma);
+      
+      // Process battle for MMR
+      await mmrIntegration.processBattleForMmr(
+        BigInt(albionId),
+        battle,
+        killEvents
+      );
+      
+      console.log(`✅ [KILLS-WORKER] MMR processing queued for battle ${albionId}`);
+      return; // Success, exit retry loop
+    } catch (error) {
+      if (attempt === maxRetries) {
+        console.error(`❌ [KILLS-WORKER] MMR processing failed for battle ${albionId} after ${maxRetries} attempts:`, error);
+        throw error;
+      }
+      
+      console.warn(`⚠️ [KILLS-WORKER] MMR processing failed for battle ${albionId}, attempt ${attempt}/${maxRetries}:`, error);
+      
+      // Wait before retrying
+      await new Promise(resolve => setTimeout(resolve, retryDelay * attempt));
     }
-    
-    console.log(`📊 [KILLS-WORKER] Found battle ${albionId}: ${battle.totalPlayers} players, ${battle.totalFame} fame`);
-    
-    // Initialize MMR integration service
-    const mmrIntegration = new MmrIntegrationService(prisma);
-    
-    // Process battle for MMR
-    await mmrIntegration.processBattleForMmr(
-      BigInt(albionId),
-      battle,
-      killEvents
-    );
-    
-    console.log(`✅ [KILLS-WORKER] MMR processing queued for battle ${albionId}`);
-  } catch (error) {
-    console.error(`❌ [KILLS-WORKER] MMR processing failed for battle ${albionId}:`, error);
-    throw error;
   }
 }
 
 /**
- * Mark a battle as having kills fetched
+ * Mark a battle as having kills fetched with retry logic
  */
 async function markBattleKillsFetched(albionId: string): Promise<void> {
-  try {
-    await prisma.battle.update({
-      where: { albionId: BigInt(albionId) },
-      data: { killsFetchedAt: new Date() }
-    });
-  } catch (error) {
-    console.error(`❌ Failed to mark battle ${albionId} as kills fetched:`, error);
-    // Don't throw - this is not critical for the main job
+  const maxRetries = 3;
+  const retryDelay = 1000; // 1 second
+
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      await prisma.battle.update({
+        where: { albionId: BigInt(albionId) },
+        data: { killsFetchedAt: new Date() }
+      });
+      return; // Success, exit retry loop
+    } catch (error) {
+      if (attempt === maxRetries) {
+        console.error(`❌ Failed to mark battle ${albionId} as kills fetched after ${maxRetries} attempts:`, error);
+        // Don't throw - this is not critical for the main job
+        return;
+      }
+      
+      console.warn(`⚠️ Failed to mark battle ${albionId} as kills fetched, attempt ${attempt}/${maxRetries}:`, error);
+      
+      // Wait before retrying
+      await new Promise(resolve => setTimeout(resolve, retryDelay * attempt));
+    }
   }
 }
 

@@ -1,14 +1,11 @@
 import { Worker } from 'bullmq';
-import { PrismaClient } from '@prisma/client';
 import { log } from '../src/log.js';
 import { BattleNotifierWorker, BattleNotificationJob } from '../src/workers/battleNotifier/worker.js';
 import redis from '../src/queue/connection.js';
 import { config } from '../src/lib/config.js';
+import { prisma } from '../src/db/prisma.js';
 
 const logger = log.child({ component: 'battle-notifier-app' });
-
-// Initialize Prisma client
-const prisma = new PrismaClient();
 
 // Initialize tracking worker
 const trackingWorker = new BattleNotifierWorker(prisma);
