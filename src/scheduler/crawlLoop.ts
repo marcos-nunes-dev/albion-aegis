@@ -2,6 +2,7 @@ import { runBattleCrawl } from '../workers/battleCrawler/producer.js';
 import { config } from '../lib/config.js';
 import { shouldSlowDown, getRateLimitStats } from '../http/client.js';
 import { log } from '../log.js';
+import { cleanupOldJobs } from '../queue/queues.js';
 
 // Rate limiting state for slowdown tracking
 interface SlowdownState {
@@ -122,12 +123,66 @@ export function startCrawlLoop(): ReturnType<typeof setInterval> {
 }
 
 /**
+ * Start the Redis cleanup loop that runs every 30 minutes
+ */
+export function startCleanupLoop(): ReturnType<typeof setInterval> {
+  log.info('Starting Redis cleanup loop', { 
+    intervalMinutes: config.REDIS_CLEANUP_INTERVAL_MIN,
+  });
+  
+  let cleanupCount = 0;
+  
+  const cleanupInterval = setInterval(async () => {
+    cleanupCount++;
+    const startTime = Date.now();
+    
+    log.info('Redis cleanup starting', { 
+      cleanupNumber: cleanupCount, 
+      timestamp: new Date().toISOString() 
+    });
+    
+    try {
+      // Run the Redis cleanup
+      await cleanupOldJobs();
+      
+      const duration = Date.now() - startTime;
+      log.info('Redis cleanup completed', { 
+        cleanupNumber: cleanupCount, 
+        durationMs: duration 
+      });
+      
+    } catch (error) {
+      const duration = Date.now() - startTime;
+      log.error('Redis cleanup failed', { 
+        cleanupNumber: cleanupCount, 
+        durationMs: duration,
+        error: error instanceof Error ? error.message : 'Unknown error'
+      });
+      
+      // Don't throw - continue with next cleanup
+    }
+  }, config.REDIS_CLEANUP_INTERVAL_MIN * 60 * 1000); // Configurable interval
+  
+  // Return the interval ID for cleanup
+  return cleanupInterval;
+}
+
+/**
  * Stop the crawl loop
  */
 export function stopCrawlLoop(intervalId: ReturnType<typeof setInterval>): void {
   log.info('Stopping crawl loop');
   clearInterval(intervalId);
   log.info('Crawl loop stopped');
+}
+
+/**
+ * Stop the cleanup loop
+ */
+export function stopCleanupLoop(intervalId: ReturnType<typeof setInterval>): void {
+  log.info('Stopping cleanup loop');
+  clearInterval(intervalId);
+  log.info('Cleanup loop stopped');
 }
 
 /**

@@ -36,9 +36,9 @@ export const battleCrawlQueue = new Queue<BattleCrawlJobData>(QUEUE_NAMES.BATTLE
 export const killsFetchQueue = new Queue<KillsFetchJobData>(QUEUE_NAMES.KILLS_FETCH, {
   connection: redis,
   defaultJobOptions: {
-    // Remove completed jobs after 24 hours (keep for debugging)
-    removeOnComplete: 1000,
-    removeOnFail: 100,
+    // Remove completed jobs after 1 hour (reduced from 24 hours)
+    removeOnComplete: 100,
+    removeOnFail: 50,
     // Retry failed jobs more aggressively for kills
     attempts: 5,
     backoff: {
@@ -102,6 +102,44 @@ export async function clearAllQueues() {
     killsFetchQueue.obliterate({ force: true }),
   ]);
   console.log('🧹 All queues cleared');
+}
+
+export async function cleanupOldJobs() {
+  console.log('🧹 Cleaning up old jobs...');
+  
+  // Clean up jobs older than 30 minutes for high-volume processing
+  const thirtyMinutes = 30 * 60 * 1000;
+  
+  try {
+    await Promise.all([
+      battleCrawlQueue.clean(thirtyMinutes, 'completed' as any),
+      battleCrawlQueue.clean(thirtyMinutes, 'failed' as any),
+      killsFetchQueue.clean(thirtyMinutes, 'completed' as any),
+      killsFetchQueue.clean(thirtyMinutes, 'failed' as any),
+    ]);
+    console.log('✅ Old jobs cleaned up');
+  } catch (error) {
+    console.error('❌ Error during cleanup:', error);
+  }
+}
+
+export async function aggressiveCleanup() {
+  console.log('🧹 Performing aggressive cleanup...');
+  
+  // Clean up jobs older than 10 minutes for very high volume
+  const tenMinutes = 10 * 60 * 1000;
+  
+  try {
+    await Promise.all([
+      battleCrawlQueue.clean(tenMinutes, 'completed' as any),
+      battleCrawlQueue.clean(tenMinutes, 'failed' as any),
+      killsFetchQueue.clean(tenMinutes, 'completed' as any),
+      killsFetchQueue.clean(tenMinutes, 'failed' as any),
+    ]);
+    console.log('✅ Aggressive cleanup completed');
+  } catch (error) {
+    console.error('❌ Error during aggressive cleanup:', error);
+  }
 }
 
 export async function closeAllQueues() {

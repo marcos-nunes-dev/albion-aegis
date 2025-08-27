@@ -48,6 +48,9 @@ const configSchema = z.object({
   DATABASE_POOL_MAX: z.coerce.number().positive().default(10),
   DATABASE_CONNECTION_TIMEOUT: z.coerce.number().positive().default(30000),
   DATABASE_IDLE_TIMEOUT: z.coerce.number().positive().default(60000),
+  
+  // Redis Cleanup Configuration
+  REDIS_CLEANUP_INTERVAL_MIN: z.coerce.number().positive().default(30),
 });
 
 // Parse and validate the configuration

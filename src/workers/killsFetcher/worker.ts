@@ -84,8 +84,8 @@ export function createKillsFetcherWorker(): Worker {
     {
       connection: redis,
       concurrency: config.KILLS_WORKER_CONCURRENCY,
-      removeOnComplete: { count: 1000 },  // Keep last 1000 completed jobs
-      removeOnFail: { count: 500 },       // Keep last 500 failed jobs
+      removeOnComplete: { count: 100 },   // Keep last 100 completed jobs (reduced for high volume)
+      removeOnFail: { count: 50 },        // Keep last 50 failed jobs (reduced for high volume)
     }
   );
   
