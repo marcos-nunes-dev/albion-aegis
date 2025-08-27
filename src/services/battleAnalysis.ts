@@ -103,7 +103,8 @@ export class BattleAnalysisService {
     } catch (error) {
       logger.error('Error creating battle analysis', {
         battleId: battleId.toString(),
-        error: error instanceof Error ? error.message : 'Unknown error'
+        error: error instanceof Error ? error.message : 'Unknown error',
+        stack: error instanceof Error ? error.stack : undefined
       });
       return null;
     }
@@ -288,7 +289,7 @@ export class BattleAnalysisService {
     } else {
       guildStatsMap.set(guildName, {
         guildName,
-        guildId: '', // Will be set later
+        guildId: '', // Will be set later when guild is created
         kills: update.kills || 0,
         deaths: update.deaths || 0,
         fameGained: update.fameGained || 0,
@@ -539,11 +540,23 @@ export class BattleAnalysisService {
 
     return Promise.all(
       guildStats.map(async (guildStat) => {
-        const currentMmr = await mmrService.getGuildSeasonMmr(guildStat.guildId, seasonId);
-        return {
-          ...guildStat,
-          currentMmr: currentMmr?.currentMmr ?? 1000.0
-        };
+        try {
+          const currentMmr = await mmrService.getGuildSeasonMmr(guildStat.guildId, seasonId);
+          return {
+            ...guildStat,
+            currentMmr: currentMmr?.currentMmr ?? 1000.0
+          };
+        } catch (error) {
+          logger.warn('Error getting MMR for guild, using default', {
+            guildId: guildStat.guildId,
+            guildName: guildStat.guildName,
+            error: error instanceof Error ? error.message : 'Unknown error'
+          });
+          return {
+            ...guildStat,
+            currentMmr: 1000.0
+          };
+        }
       })
     );
   }

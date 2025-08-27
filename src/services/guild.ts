@@ -34,29 +34,93 @@ export class GuildService {
       if (!guildId) {
         logger.warn('Could not find guild ID from AlbionBB API', { guildName });
         // Create guild with a placeholder ID (we'll update it later if we find the real ID)
-        const placeholderGuild = await this.prisma.guild.create({
-          data: {
-            id: `placeholder_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-            name: guildName
+        try {
+          const placeholderGuild = await this.prisma.guild.create({
+            data: {
+              id: `placeholder_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+              name: guildName
+            }
+          });
+          logger.info('Created guild with placeholder ID', { guildName, guildId: placeholderGuild.id });
+          return placeholderGuild;
+        } catch (createError) {
+          // Handle case where guild might have been created by another process
+          if (createError instanceof Error && createError.message.includes('Unique constraint')) {
+            logger.info('Guild already exists (race condition), fetching it', { guildName });
+            const existingGuild = await this.prisma.guild.findUnique({
+              where: { name: guildName }
+            });
+            if (existingGuild) {
+              return existingGuild;
+            }
+            
+            // If name doesn't exist but ID does, try to find by ID
+            if (createError.message.includes('fields: (`id`)')) {
+              logger.info('Guild ID already exists, trying to find by ID', { guildName, guildId });
+              const existingGuildById = await this.prisma.guild.findUnique({
+                where: { id: guildId! }
+              });
+              if (existingGuildById) {
+                logger.warn('Found guild with same ID but different name', { 
+                  requestedName: guildName, 
+                  existingName: existingGuildById.name,
+                  guildId 
+                });
+                return existingGuildById;
+              }
+            }
           }
-        });
-        logger.info('Created guild with placeholder ID', { guildName, guildId: placeholderGuild.id });
-        return placeholderGuild;
+          throw createError;
+        }
       }
 
       // Create guild with the real ID
-      const newGuild = await this.prisma.guild.create({
-        data: {
-          id: guildId,
-          name: guildName
-        }
-      });
+      try {
+        const newGuild = await this.prisma.guild.create({
+          data: {
+            id: guildId,
+            name: guildName
+          }
+        });
 
-      logger.info('Created new guild with AlbionBB ID', { guildName, guildId: newGuild.id });
-      return newGuild;
+        logger.info('Created new guild with AlbionBB ID', { guildName, guildId: newGuild.id });
+        return newGuild;
+      } catch (createError) {
+        // Handle case where guild might have been created by another process
+        if (createError instanceof Error && createError.message.includes('Unique constraint')) {
+          logger.info('Guild already exists (race condition), fetching it', { guildName });
+          const existingGuild = await this.prisma.guild.findUnique({
+            where: { name: guildName }
+          });
+          if (existingGuild) {
+            return existingGuild;
+          }
+          
+          // If name doesn't exist but ID does, try to find by ID
+          if (createError.message.includes('fields: (`id`)')) {
+            logger.info('Guild ID already exists, trying to find by ID', { guildName, guildId });
+            const existingGuildById = await this.prisma.guild.findUnique({
+              where: { id: guildId }
+            });
+            if (existingGuildById) {
+              logger.warn('Found guild with same ID but different name', { 
+                requestedName: guildName, 
+                existingName: existingGuildById.name,
+                guildId 
+              });
+              return existingGuildById;
+            }
+          }
+        }
+        throw createError;
+      }
 
     } catch (error) {
-      logger.error('Error in getOrCreateGuild', { guildName, error: error instanceof Error ? error.message : 'Unknown error' });
+      logger.error('Error in getOrCreateGuild', { 
+        guildName, 
+        error: error instanceof Error ? error.message : 'Unknown error',
+        stack: error instanceof Error ? error.stack : undefined
+      });
       throw error;
     }
   }

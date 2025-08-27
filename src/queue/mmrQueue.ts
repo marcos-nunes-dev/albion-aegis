@@ -24,7 +24,7 @@ export const JOB_TYPES = {
 
 // Job data interfaces
 export interface MmrCalculationJobData {
-  battleId: bigint;
+  battleId: string; // Changed from bigint to string for serialization
   seasonId: string;
   guildStats: GuildBattleStats[];
   totalPlayers: number;
@@ -37,7 +37,7 @@ export interface MmrCalculationJobData {
 }
 
 export interface BatchMmrJobData {
-  battleIds: bigint[];
+  battleIds: string[]; // Changed from bigint[] to string[] for serialization
   seasonId: string;
   retryCount?: number;
 }
@@ -93,9 +93,9 @@ export async function addMmrCalculationJob(
       throw new Error('Battle does not meet MMR calculation criteria');
     }
 
-    // Create job data
+    // Create job data - convert BigInt to string for serialization
     const jobData: MmrCalculationJobData = {
-      battleId: battleAnalysis.battleId,
+      battleId: battleAnalysis.battleId.toString(),
       seasonId: battleAnalysis.seasonId,
       guildStats: battleAnalysis.guildStats,
       totalPlayers: battleAnalysis.totalPlayers,
@@ -128,7 +128,10 @@ export async function addMmrCalculationJob(
   } catch (error) {
     logger.error('Error adding MMR calculation job to queue', {
       battleId: battleAnalysis.battleId.toString(),
-      error: error instanceof Error ? error.message : 'Unknown error'
+      totalPlayers: battleAnalysis.totalPlayers,
+      totalFame: battleAnalysis.totalFame,
+      error: error instanceof Error ? error.message : 'Unknown error',
+      stack: error instanceof Error ? error.stack : undefined
     });
     throw error;
   }
@@ -144,7 +147,7 @@ export async function addBatchMmrJob(
 ): Promise<Job<BatchMmrJobData>> {
   try {
     const jobData: BatchMmrJobData = {
-      battleIds,
+      battleIds: battleIds.map(id => id.toString()),
       seasonId
     };
 
@@ -180,7 +183,8 @@ export async function addBatchMmrJob(
  * Process MMR calculation job
  */
 async function processMmrCalculationJob(job: Job<MmrCalculationJobData>): Promise<void> {
-  const { battleId, seasonId, guildStats, totalPlayers, totalFame, battleDuration, isPrimeTime, killClustering, friendGroups } = job.data;
+  const { battleId: battleIdStr, seasonId, guildStats, totalPlayers, totalFame, battleDuration, isPrimeTime, killClustering, friendGroups } = job.data;
+  const battleId = BigInt(battleIdStr);
   
   try {
     logger.info('Processing MMR calculation job', {
@@ -286,17 +290,18 @@ async function processMmrCalculationJob(job: Job<MmrCalculationJobData>): Promis
  * Process batch MMR job
  */
 async function processBatchMmrJob(job: Job<BatchMmrJobData>): Promise<void> {
-  const { battleIds, seasonId } = job.data;
+  const { battleIds: battleIdStrs, seasonId } = job.data;
 
   try {
     logger.info('Processing batch MMR job', {
       jobId: job.id,
-      battleCount: battleIds.length,
+      battleCount: battleIdStrs.length,
       seasonId
     });
 
     // Process each battle individually
-    for (const battleId of battleIds) {
+    for (const battleIdStr of battleIdStrs) {
+      const battleId = BigInt(battleIdStr);
       try {
         // Fetch battle and kills data from database
         const battleData = await fetchBattleDataForMmr(battleId);
@@ -324,7 +329,7 @@ async function processBatchMmrJob(job: Job<BatchMmrJobData>): Promise<void> {
 
     logger.info('Successfully processed batch MMR job', {
       jobId: job.id,
-      battleCount: battleIds.length
+      battleCount: battleIdStrs.length
     });
 
   } catch (error) {

@@ -382,7 +382,7 @@ export async function getKillsForBattle(albionId: bigint): Promise<KillEventsRes
  * @returns Promise<GuildSearchResponse>
  */
 export async function searchGuilds(name: string): Promise<GuildSearchResponse> {
-  const url = `${config.API_BASE_URL}/guilds/search?name=${encodeURIComponent(name)}`;
+  const url = `${config.API_BASE_URL}/guilds/search?search=${encodeURIComponent(name)}`;
   
   httpLogger.info('Searching for guilds', { name });
   
