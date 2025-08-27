@@ -1,6 +1,6 @@
 import { startCrawlLoop, stopCrawlLoop } from '../src/scheduler/crawlLoop.js';
 import { config } from '../src/lib/config.js';
-import { prisma } from '../src/db/prisma.js';
+import { getPrisma, getHealthStatus } from '../src/db/database.js';
 
 console.log('🔄 Albion Scheduler starting...');
 console.log('📊 Configuration:', {
@@ -10,10 +10,22 @@ console.log('📊 Configuration:', {
   CRAWL_INTERVAL_SEC: config.CRAWL_INTERVAL_SEC,
   MAX_PAGES_PER_CRAWL: config.MAX_PAGES_PER_CRAWL,
   SOFT_LOOKBACK_MIN: config.SOFT_LOOKBACK_MIN,
+  DATABASE_POOL_MIN: config.DATABASE_POOL_MIN,
+  DATABASE_POOL_MAX: config.DATABASE_POOL_MAX,
+});
+
+// Log database health status
+const healthStatus = getHealthStatus();
+console.log('🗄️ Database Health Status:', {
+  isConnected: healthStatus.isConnected,
+  connectionErrors: healthStatus.connectionErrors,
+  lastHealthCheck: healthStatus.lastHealthCheck,
+  poolConfig: healthStatus.poolConfig,
 });
 
 // Test database connection
 try {
+  const prisma = getPrisma();
   await prisma.$connect();
   console.log('✅ Database connection successful');
 } catch (error) {
@@ -27,11 +39,13 @@ const crawlInterval = startCrawlLoop();
 console.log('✅ Scheduler started successfully');
 console.log(`💡 Crawl loop running every ${config.CRAWL_INTERVAL_SEC} seconds`);
 console.log('💡 Rate limiting and slowdown hooks are active');
+console.log(`💡 Database pool: ${config.DATABASE_POOL_MIN}-${config.DATABASE_POOL_MAX} connections`);
 
 // Graceful shutdown
 process.on('SIGTERM', async () => {
   console.log('🛑 Shutting down scheduler...');
   stopCrawlLoop(crawlInterval);
+  const prisma = getPrisma();
   await prisma.$disconnect();
   process.exit(0);
 });
@@ -39,6 +53,7 @@ process.on('SIGTERM', async () => {
 process.on('SIGINT', async () => {
   console.log('🛑 Shutting down scheduler...');
   stopCrawlLoop(crawlInterval);
+  const prisma = getPrisma();
   await prisma.$disconnect();
   process.exit(0);
 });

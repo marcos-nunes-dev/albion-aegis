@@ -293,7 +293,81 @@ DATABASE_POOL_MIN=2
 DATABASE_POOL_MAX=10
 DATABASE_CONNECTION_TIMEOUT=30000
 DATABASE_IDLE_TIMEOUT=60000
-KILLS_WORKER_CONCURRENCY=3
+```
+
+## 📋 Service Update Status
+
+### ✅ Updated Services (Using New Database Manager)
+
+The following services have been updated to use the new database manager with connection pooling:
+
+1. **🔪 Kills Worker** (`apps/kills-worker.ts`)
+   - ✅ Enhanced with connection pooling
+   - ✅ Retry logic for database operations
+   - ✅ Health monitoring integration
+
+2. **🏆 MMR Worker** (`apps/mmr-worker.ts`)
+   - ✅ Enhanced with connection pooling
+   - ✅ Health status logging
+   - ✅ Graceful shutdown handling
+
+3. **🔄 Scheduler** (`apps/scheduler.ts`)
+   - ✅ Enhanced with connection pooling
+   - ✅ Health status logging
+   - ✅ Graceful shutdown handling
+
+4. **🔔 Battle Notifier** (`apps/battle-notifier.ts`)
+   - ✅ Enhanced with connection pooling
+   - ✅ Health status logging
+   - ✅ Graceful shutdown handling
+
+5. **📊 MMR Queue Services** (`src/queue/mmrQueue.ts`)
+   - ✅ Enhanced with connection pooling
+   - ✅ All MMR calculation services updated
+
+### 🔄 Services That Could Benefit from Updates
+
+The following services are still using the old prisma import but could benefit from the new database manager:
+
+1. **🛠️ Management Scripts** (Low Priority)
+   - `apps/manage-mmr.ts` - MMR management commands
+   - `apps/manage-tracking.ts` - Tracking management
+   - `apps/backfill.ts` - Data backfill operations
+   - `apps/debug-tracking.ts` - Debug utilities
+
+2. **🔄 Crawl Services** (Medium Priority)
+   - `apps/deep-sweep-hourly.ts` - Hourly deep sweep
+   - `apps/deep-sweep-nightly.ts` - Nightly deep sweep
+   - `apps/dev-once.ts` - Development utilities
+
+3. **🏗️ Core Services** (Low Priority - Already Working)
+   - `src/services/watermark.ts` - Service state management
+   - `src/workers/battleCrawler/producer.ts` - Battle crawling
+
+### 📊 Priority Recommendations
+
+| Priority | Service Type | Reason |
+|----------|-------------|---------|
+| **High** | Production Workers | Already updated - kills, MMR, scheduler, notifier |
+| **Medium** | Crawl Services | Could benefit from retry logic for long-running operations |
+| **Low** | Management Scripts | One-off operations, less critical for connection stability |
+
+### 🔧 How to Update Remaining Services
+
+For services that need updating, follow this pattern:
+
+```typescript
+// Before
+import { prisma } from '../src/db/prisma.js';
+
+// After
+import { getPrisma, executeWithRetry } from '../src/db/database.js';
+
+// For critical operations, use retry logic:
+const result = await executeWithRetry(async () => {
+  const prisma = getPrisma();
+  return await prisma.someTable.create({ data: someData });
+});
 ```
 
 ## 📚 Additional Resources
@@ -304,4 +378,4 @@ KILLS_WORKER_CONCURRENCY=3
 
 ---
 
-**Note**: This connection pooling system is specifically optimized for the kills service but can be extended to other services in the Albion Aegis system.
+**Note**: The core production services (kills, MMR, scheduler, notifier) have been updated with the new connection pooling system. The remaining services continue to work through the backward-compatible prisma export but could be enhanced in the future for additional resilience.

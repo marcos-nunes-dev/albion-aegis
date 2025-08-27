@@ -3,11 +3,21 @@ import { log } from '../src/log.js';
 import { BattleNotifierWorker, BattleNotificationJob } from '../src/workers/battleNotifier/worker.js';
 import redis from '../src/queue/connection.js';
 import { config } from '../src/lib/config.js';
-import { prisma } from '../src/db/prisma.js';
+import { getPrisma, getHealthStatus } from '../src/db/database.js';
 
 const logger = log.child({ component: 'battle-notifier-app' });
 
-// Initialize tracking worker
+// Log database health status
+const healthStatus = getHealthStatus();
+logger.info('🗄️ Database Health Status:', {
+  isConnected: healthStatus.isConnected,
+  connectionErrors: healthStatus.connectionErrors,
+  lastHealthCheck: healthStatus.lastHealthCheck,
+  poolConfig: healthStatus.poolConfig,
+});
+
+// Initialize tracking worker with enhanced database connection
+const prisma = getPrisma();
 const trackingWorker = new BattleNotifierWorker(prisma);
 
 // Create BullMQ worker
@@ -70,6 +80,7 @@ const shutdown = async (signal: string) => {
     logger.info({ message: 'Battle notification worker closed' });
 
     // Close Prisma connection
+    const prisma = getPrisma();
     await prisma.$disconnect();
     logger.info({ message: 'Prisma connection closed' });
 
@@ -109,5 +120,6 @@ process.on('unhandledRejection', (reason, promise) => {
 // Start the worker
 logger.info({
   message: 'Battle notification worker started',
-  concurrency: config.BATTLE_NOTIFIER_CONCURRENCY || 2
+  concurrency: config.BATTLE_NOTIFIER_CONCURRENCY || 2,
+  databasePool: `${config.DATABASE_POOL_MIN}-${config.DATABASE_POOL_MAX} connections`
 });

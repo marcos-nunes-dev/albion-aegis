@@ -5,7 +5,7 @@ import { MmrService } from '../services/mmr.js';
 import { GuildService } from '../services/guild.js';
 import { SeasonService } from '../services/season.js';
 import { BattleAnalysisService } from '../services/battleAnalysis.js';
-import { prisma } from '../db/prisma.js';
+import { getPrisma } from '../db/database.js';
 import type { BattleAnalysis, GuildBattleStats } from '../services/mmr.js';
 import type { MmrJobStatus } from '../types/mmr.js';
 
@@ -70,10 +70,10 @@ export const mmrBatchQueue = new Queue(MMR_BATCH_QUEUE, {
 });
 
 // Initialize services
-const mmrService = new MmrService(prisma);
-const guildService = new GuildService(prisma);
-const seasonService = new SeasonService(prisma);
-const battleAnalysisService = new BattleAnalysisService(prisma);
+const mmrService = new MmrService(getPrisma());
+const guildService = new GuildService(getPrisma());
+const seasonService = new SeasonService(getPrisma());
+const battleAnalysisService = new BattleAnalysisService(getPrisma());
 
 /**
  * Add MMR calculation job to queue
@@ -371,7 +371,7 @@ async function updateMmrJobStatus(battleId: bigint, status: MmrJobStatus): Promi
     console.log(`🏆 [JOB-STATUS] Updating MMR job status to ${status} for battle ${battleId}`);
     
     // Get the active season for this battle
-    const battle = await prisma.battle.findUnique({
+    const battle = await getPrisma().battle.findUnique({
       where: { albionId: battleId }
     });
     
@@ -384,7 +384,7 @@ async function updateMmrJobStatus(battleId: bigint, status: MmrJobStatus): Promi
     }
 
     // Find the season that was active when this battle occurred
-    const season = await prisma.season.findFirst({
+    const season = await getPrisma().season.findFirst({
       where: {
         startDate: { lte: battle.startedAt },
         OR: [
@@ -407,7 +407,7 @@ async function updateMmrJobStatus(battleId: bigint, status: MmrJobStatus): Promi
     console.log(`📊 [JOB-STATUS] Found season: ${season.name} (${season.id}) for battle ${battleId}`);
 
     // Update or create MMR calculation job record
-    await prisma.mmrCalculationJob.upsert({
+    await getPrisma().mmrCalculationJob.upsert({
       where: { 
         battleId_seasonId: { 
           battleId, 
@@ -470,7 +470,7 @@ async function applyFallbackMmrChange(
       if (!currentMmr) continue;
 
       // Apply fallback change
-      await prisma.guildSeason.update({
+      await getPrisma().guildSeason.update({
         where: { id: currentMmr.id },
         data: {
           currentMmr: currentMmr.currentMmr + fallbackChange,
