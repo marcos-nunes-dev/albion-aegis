@@ -1,11 +1,11 @@
 #!/usr/bin/env tsx
 
 // import { runBattleCrawl } from '../src/workers/battleCrawler/producer.js';
-import { getBattlesPage } from '../src/http/client.js';
+import { getBattlesPage, getBattleDetail } from '../src/http/client.js';
 import { prisma } from '../src/db/prisma.js';
 import { killsFetchQueue } from '../src/queue/queues.js';
 import { config } from '../src/lib/config.js';
-import type { BattleListItem } from '../src/types/albion.js';
+import type { BattleListItem, BattleDetail } from '../src/types/albion.js';
 
 // Parse command line arguments
 function parseArgs(): { cutoff: string; pages: number; sleepMs: number } {
@@ -48,12 +48,25 @@ function sleep(ms: number): Promise<void> {
 }
 
 /**
- * Upsert a battle to the database
+ * Upsert a battle to the database with complete data from API
  */
 async function upsertBattle(battle: BattleListItem) {
   const existingBattle = await prisma.battle.findUnique({
     where: { albionId: battle.albionId }
   });
+  
+  // Fetch complete battle data from API to get full guild/alliance information
+  let completeBattleData: BattleDetail | null = null;
+  try {
+    console.log(`📊 Fetching complete battle data for ${battle.albionId}...`);
+    completeBattleData = await getBattleDetail(battle.albionId);
+  } catch (error) {
+    console.warn(`⚠️ Failed to fetch complete battle data for ${battle.albionId}, using list data:`, error);
+  }
+  
+  // Use complete data if available, otherwise fall back to list data
+  const alliancesData = completeBattleData?.alliances || battle.alliances;
+  const guildsData = completeBattleData?.guilds || battle.guilds;
   
   const battleData = {
     albionId: battle.albionId,
@@ -61,8 +74,8 @@ async function upsertBattle(battle: BattleListItem) {
     totalFame: battle.totalFame,
     totalKills: battle.totalKills,
     totalPlayers: battle.totalPlayers,
-    alliancesJson: battle.alliances,
-    guildsJson: battle.guilds,
+    alliancesJson: alliancesData,
+    guildsJson: guildsData,
     ingestedAt: new Date(),
   };
   
@@ -71,11 +84,13 @@ async function upsertBattle(battle: BattleListItem) {
       where: { albionId: battle.albionId },
       data: battleData
     });
+    console.log(`✅ Updated battle ${battle.albionId} with complete data (${guildsData.length} guilds, ${alliancesData.length} alliances)`);
     return { battle: updatedBattle, wasCreated: false };
   } else {
     const newBattle = await prisma.battle.create({
       data: battleData
     });
+    console.log(`✅ Created battle ${battle.albionId} with complete data (${guildsData.length} guilds, ${alliancesData.length} alliances)`);
     return { battle: newBattle, wasCreated: true };
   }
 }

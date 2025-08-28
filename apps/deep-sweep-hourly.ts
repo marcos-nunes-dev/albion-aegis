@@ -2,7 +2,7 @@
 import { config } from '../src/lib/config.js';
 import { log } from '../src/log.js';
 import redis from '../src/queue/connection.js';
-import { getBattlesPage } from '../src/http/client.js';
+import { getBattlesPage, getBattleDetail } from '../src/http/client.js';
 import { prisma } from '../src/db/prisma.js';
 // import { getWatermark } from '../src/services/watermark.js';
 const logger = log.child({ component: 'deep-sweep-hourly' });
@@ -68,6 +68,24 @@ async function runDeepSweepHourly(): Promise<void> {
             allOlderThanCutoff = false;
             
             try {
+              // Fetch complete battle data from API to get full guild/alliance information
+              let completeBattleData: any = null;
+              try {
+                logger.debug('Fetching complete battle data from API', {
+                  albionId: battle.albionId.toString()
+                });
+                completeBattleData = await getBattleDetail(battle.albionId);
+              } catch (error) {
+                logger.warn('Failed to fetch complete battle data, using list data', {
+                  albionId: battle.albionId.toString(),
+                  error: error instanceof Error ? error.message : 'Unknown error'
+                });
+              }
+              
+              // Use complete data if available, otherwise fall back to list data
+              const alliancesData = completeBattleData?.alliances || battle.alliances;
+              const guildsData = completeBattleData?.guilds || battle.guilds;
+              
               // Upsert battle using the same pattern as battle crawler
               const existingBattle = await prisma.battle.findUnique({
                 where: { albionId: battle.albionId }
@@ -79,8 +97,8 @@ async function runDeepSweepHourly(): Promise<void> {
                 totalFame: battle.totalFame,
                 totalKills: battle.totalKills,
                 totalPlayers: battle.totalPlayers,
-                alliancesJson: battle.alliances,
-                guildsJson: battle.guilds,
+                alliancesJson: alliancesData,
+                guildsJson: guildsData,
                 ingestedAt: new Date(),
               };
               

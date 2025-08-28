@@ -261,7 +261,7 @@ export class BattleAnalysisService {
       // First try the raw battle data guilds array (from API response)
       if (battleData.guilds && Array.isArray(battleData.guilds)) {
         guildsData = battleData.guilds;
-        console.log(`📊 [BATTLE-ANALYSIS] Using guilds from battle data: ${guildsData.length} guilds`);
+        console.log(`📊 [BATTLE-ANALYSIS] Using guilds from API battle data: ${guildsData.length} guilds`);
       }
       // Then try the processed guildsJson (from database)
       else if (battleData.guildsJson && typeof battleData.guildsJson === 'object') {
@@ -336,6 +336,21 @@ export class BattleAnalysisService {
         console.log(`📊 [BATTLE-ANALYSIS] Extracted ${guildsData.length} guilds from kills data:`, Array.from(guildNames));
       }
 
+      // If we still don't have player counts, try to extract them from the players array in battle data
+      if (guildsData.length > 0 && guildsData.every(g => !g.players || g.players === 0)) {
+        console.log(`📊 [BATTLE-ANALYSIS] No player counts found in guilds data, extracting from players array`);
+        const playerCountsByGuild = this.extractPlayerCountsFromPlayersArray(battleData);
+        
+        // Update guildsData with player counts
+        guildsData = guildsData.map(guild => ({
+          ...guild,
+          players: playerCountsByGuild.get(guild.name) || 0
+        }));
+        
+        console.log(`📊 [BATTLE-ANALYSIS] Updated guilds with player counts from players array:`, 
+          guildsData.map(g => `${g.name}: ${g.players} players`));
+      }
+
       // Process each guild from battle data
       for (const guild of guildsData) {
         if (!guild.name || typeof guild.name !== 'string') {
@@ -346,8 +361,17 @@ export class BattleAnalysisService {
         // Get or create guild in database
         const guildEntity = await this.guildService.getOrCreateGuild(guild.name);
         
-        // Calculate average IP from kills data for this guild
-        const avgIP = this.calculateAverageIP(guild.name, killsData);
+        // Use guild IP from battle data (now complete), fallback to kills data if needed
+        let avgIP = guild.ip || 0;
+        let ipSource = 'guild_data';
+        
+        if (!avgIP || avgIP === 0) {
+          // Only calculate from kills data if guild IP is not available
+          avgIP = this.calculateAverageIP(guild.name, killsData);
+          ipSource = 'kills_calculation';
+        }
+        
+        console.log(`📊 [BATTLE-ANALYSIS] Guild ${guild.name} IP: ${avgIP} (source: ${ipSource})`);
 
         // Create guild stats from battle data
         const guildStat: GuildBattleStats = {
@@ -358,7 +382,7 @@ export class BattleAnalysisService {
           fameGained: guild.killFame || 0,
           fameLost: 0, // Will be calculated from kills data if needed
           players: guild.players || 0,
-          avgIP: guild.ip || avgIP || 1000,
+          avgIP: avgIP || 1000, // Use guild IP from battle data, fallback to calculated or default
           isPrimeTime: false, // Will be set later
           currentMmr: 1000.0 // Will be updated later
         };
@@ -380,7 +404,7 @@ export class BattleAnalysisService {
 
         guildStats.push(guildStat);
         
-        console.log(`📊 [BATTLE-ANALYSIS] Processed guild ${guild.name}: ${guildStat.kills} kills, ${guildStat.deaths} deaths, ${guildStat.fameGained} fame gained, ${guildStat.fameLost} fame lost, ${guildStat.players} players`);
+        console.log(`📊 [BATTLE-ANALYSIS] Processed guild ${guild.name}: ${guildStat.kills} kills, ${guildStat.deaths} deaths, ${guildStat.fameGained} fame gained, ${guildStat.fameLost} fame lost, ${guildStat.players} players, ${guildStat.avgIP} IP`);
       }
 
       console.log(`✅ [BATTLE-ANALYSIS] Successfully processed ${guildStats.length} guilds from battle data`); 
@@ -699,19 +723,55 @@ export class BattleAnalysisService {
   }
 
   /**
+   * Extract player counts from the players array in battle data
+   * This method counts how many players belong to each guild based on the players array
+   */
+  private extractPlayerCountsFromPlayersArray(battleData: any): Map<string, number> {
+    const playerCountsByGuild = new Map<string, number>();
+
+    try {
+      // Check if we have a players array in the battle data
+      if (battleData.players && Array.isArray(battleData.players)) {
+        console.log(`📊 [BATTLE-ANALYSIS] Found ${battleData.players.length} players in battle data`);
+        
+        // Count players by guild
+        for (const player of battleData.players) {
+          const guildName = player.guildName || player.GuildName;
+          if (guildName) {
+            const currentCount = playerCountsByGuild.get(guildName) || 0;
+            playerCountsByGuild.set(guildName, currentCount + 1);
+          }
+        }
+        
+        console.log(`📊 [BATTLE-ANALYSIS] Extracted player counts for ${playerCountsByGuild.size} guilds from players array`);
+        for (const [guildName, count] of playerCountsByGuild.entries()) {
+          console.log(`   - ${guildName}: ${count} players`);
+        }
+      } else {
+        console.log(`⚠️ [BATTLE-ANALYSIS] No players array found in battle data`);
+      }
+    } catch (error) {
+      console.error(`❌ [BATTLE-ANALYSIS] Error extracting player counts from players array:`, error);
+    }
+
+    return playerCountsByGuild;
+  }
+
+  /**
    * Extract guild alliances from battle data and kills data
    */
   private extractGuildAlliances(battleData: any, killsData: any[]): Map<string, string> {
     const guildAlliances = new Map<string, string>();
 
     try {
-      // First try to get alliances from battle data guilds
+      // First try to get alliances from battle data guilds (API response format)
       if (battleData.guilds && Array.isArray(battleData.guilds)) {
         for (const guild of battleData.guilds) {
           if (guild.name && guild.alliance) {
             guildAlliances.set(guild.name, guild.alliance);
           }
         }
+        console.log(`📊 [BATTLE-ANALYSIS] Extracted alliances from API guilds data: ${guildAlliances.size} alliances`);
       }
       
       // Then try to get alliances from guildsJson
@@ -733,6 +793,16 @@ export class BattleAnalysisService {
             }
           }
         }
+      }
+
+      // Also extract alliances from players array (API response format)
+      if (battleData.players && Array.isArray(battleData.players)) {
+        for (const player of battleData.players) {
+          if (player.guildName && player.allianceName) {
+            guildAlliances.set(player.guildName, player.allianceName);
+          }
+        }
+        console.log(`📊 [BATTLE-ANALYSIS] Extracted alliances from players array: ${guildAlliances.size} alliances`);
       }
 
       // Finally, extract from kills data as fallback
@@ -764,11 +834,11 @@ export class BattleAnalysisService {
   }
 
   /**
-   * Fetch battle data for MMR calculation from database
+   * Fetch battle data for MMR calculation from database (now with complete data)
    */
   async fetchBattleDataForMmr(battleId: bigint): Promise<{ battle: any; kills: any[] } | null> {
     try {
-      // Fetch battle data from your Battle model
+      // Fetch battle data from database (now contains complete guild/alliance data)
       const battle = await this.prisma.battle.findUnique({
         where: { albionId: battleId }
       });
@@ -786,9 +856,14 @@ export class BattleAnalysisService {
         orderBy: { TimeStamp: 'asc' }
       });
 
+      console.log(`📊 [BATTLE-ANALYSIS] Fetched battle data from database: ${battle.totalPlayers} players, ${kills.length} kills`);
+      console.log(`📊 [BATTLE-ANALYSIS] Battle guilds: ${Array.isArray(battle.guildsJson) ? battle.guildsJson.length : 'N/A'}, alliances: ${Array.isArray(battle.alliancesJson) ? battle.alliancesJson.length : 'N/A'}`);
+
       logger.info('Fetched battle data for MMR calculation', {
         battleId: battleId.toString(),
-        battleFound: !!battle,
+        playerCount: battle.totalPlayers,
+        guildCount: Array.isArray(battle.guildsJson) ? battle.guildsJson.length : 0,
+        allianceCount: Array.isArray(battle.alliancesJson) ? battle.alliancesJson.length : 0,
         killCount: kills.length
       });
       

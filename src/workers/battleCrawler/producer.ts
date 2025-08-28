@@ -1,9 +1,9 @@
-import { getBattlesPage } from '../../http/client.js';
+import { getBattlesPage, getBattleDetail } from '../../http/client.js';
 import { getPrisma, executeWithRetry } from '../../db/database.js';
 import { killsFetchQueue } from '../../queue/queues.js';
 import { setWatermark } from '../../services/watermark.js';
 import { config } from '../../lib/config.js';
-import type { BattleListItem } from '../../types/albion.js';
+import type { BattleListItem, BattleDetail } from '../../types/albion.js';
 import { battleLogger } from '../../log.js';
 import { metrics } from '../../metrics.js';
 import { BattleNotifierProducer } from '../battleNotifier/producer.js';
@@ -155,7 +155,7 @@ export async function runBattleCrawl(): Promise<void> {
 }
 
 /**
- * Upsert a battle to the database
+ * Upsert a battle to the database with complete data from API
  */
 async function upsertBattle(battle: BattleListItem) {
   return await executeWithRetry(async () => {
@@ -164,14 +164,32 @@ async function upsertBattle(battle: BattleListItem) {
       where: { albionId: battle.albionId }
     });
     
+    // Fetch complete battle data from API to get full guild/alliance information
+    let completeBattleData: BattleDetail | null = null;
+    try {
+      battleLogger.debug('Fetching complete battle data from API', {
+        albionId: battle.albionId.toString()
+      });
+      completeBattleData = await getBattleDetail(battle.albionId);
+    } catch (error) {
+      battleLogger.warn('Failed to fetch complete battle data, using list data', {
+        albionId: battle.albionId.toString(),
+        error: error instanceof Error ? error.message : 'Unknown error'
+      });
+    }
+    
+    // Use complete data if available, otherwise fall back to list data
+    const alliancesData = completeBattleData?.alliances || battle.alliances;
+    const guildsData = completeBattleData?.guilds || battle.guilds;
+    
     const battleData = {
       albionId: battle.albionId,
       startedAt: new Date(battle.startedAt),
       totalFame: battle.totalFame,
       totalKills: battle.totalKills,
       totalPlayers: battle.totalPlayers,
-      alliancesJson: battle.alliances,
-      guildsJson: battle.guilds,
+      alliancesJson: alliancesData,
+      guildsJson: guildsData,
       ingestedAt: new Date(),
     };
     
@@ -180,6 +198,13 @@ async function upsertBattle(battle: BattleListItem) {
       const updatedBattle = await prisma.battle.update({
         where: { albionId: battle.albionId },
         data: battleData
+      });
+      
+      battleLogger.debug('Updated existing battle with complete data', {
+        albionId: battle.albionId.toString(),
+        hasCompleteData: !!completeBattleData,
+        guildCount: guildsData.length,
+        allianceCount: alliancesData.length
       });
       
       return { battle: updatedBattle, wasCreated: false };
@@ -191,6 +216,14 @@ async function upsertBattle(battle: BattleListItem) {
       
       // Record metrics for new battle
       metrics.recordBattleUpsert();
+      
+      battleLogger.info('Created new battle with complete data', {
+        albionId: battle.albionId.toString(),
+        hasCompleteData: !!completeBattleData,
+        guildCount: guildsData.length,
+        allianceCount: alliancesData.length,
+        totalPlayers: battle.totalPlayers
+      });
       
       return { battle: newBattle, wasCreated: true };
     }
