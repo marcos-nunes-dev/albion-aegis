@@ -11,10 +11,6 @@ const guildService = new GuildService(prisma);
 const mmrService = new MmrService(prisma);
 
 console.log('🏆 Albion MMR Management Tool');
-console.log('📊 Configuration:', {
-  NODE_ENV: config.NODE_ENV,
-  API_BASE_URL: config.API_BASE_URL,
-});
 
 // Get command line arguments
 const command = process.argv[2];
@@ -91,7 +87,7 @@ async function createSeason(args: string[]) {
   const endDate = endDateStr ? new Date(endDateStr) : undefined;
 
   const season = await seasonService.createSeason(name, startDate, endDate);
-  console.log('✅ Season created:', season);
+  console.log('✅ Season created successfully');
 }
 
 async function listSeasons() {

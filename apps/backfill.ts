@@ -153,43 +153,28 @@ async function enqueueKillsJob(albionId: bigint): Promise<void> {
  * Run backfill crawl with custom parameters
  */
 async function runBackfill(cutoffISO: string, maxPages: number, sleepMs: number): Promise<void> {
-  console.log('🔄 Starting backfill crawl...');
-  console.log(`📅 Cutoff: ${cutoffISO}`);
-  console.log(`📄 Max pages: ${maxPages}`);
-  console.log(`⏸️  Sleep between pages: ${sleepMs}ms`);
-  
   const startTime = Date.now();
   const softCutoff = new Date(cutoffISO);
   
-  let totalBattlesProcessed = 0;
   let totalBattlesUpserted = 0;
   let totalKillJobsEnqueued = 0;
-  let pagesProcessed = 0;
-  let allObjectsExistCount = 0;
   
   try {
     // Crawl pages until we hit the soft cutoff or max pages
     for (let page = 0; page < maxPages; page++) {
-      pagesProcessed++;
-      console.log(`\n📄 Processing page ${page + 1}/${maxPages}...`);
-      
       // Fetch battles for this page
       const battles = await getBattlesPage(page, 10); // minPlayers = 10
       
       if (battles.length === 0) {
-        console.log('📄 No more battles found, stopping backfill');
         break;
       }
       
       let allOlderThanCutoff = true;
-      let pageBattlesUpserted = 0;
-      let pageKillJobsEnqueued = 0;
       let pageAllObjectsExist = true;
       
       // Process each battle on this page
       for (const battle of battles) {
         const battleStartTime = new Date(battle.startedAt);
-        totalBattlesProcessed++;
         
         // Check if this battle is newer than soft cutoff
         if (battleStartTime >= softCutoff) {
@@ -200,7 +185,6 @@ async function runBackfill(cutoffISO: string, maxPages: number, sleepMs: number)
         try {
           const upsertResult = await upsertBattle(battle);
           if (upsertResult.wasCreated) {
-            pageBattlesUpserted++;
             totalBattlesUpserted++;
             pageAllObjectsExist = false;
           }
@@ -209,7 +193,6 @@ async function runBackfill(cutoffISO: string, maxPages: number, sleepMs: number)
            const shouldEnqueue = shouldEnqueueKills(battle, upsertResult.battle);
            if (shouldEnqueue) {
              await enqueueKillsJob(battle.albionId);
-             pageKillJobsEnqueued++;
              totalKillJobsEnqueued++;
            }
           
@@ -218,35 +201,19 @@ async function runBackfill(cutoffISO: string, maxPages: number, sleepMs: number)
         }
       }
       
-      console.log(`📄 Page ${page + 1} complete: ${pageBattlesUpserted} new battles, ${pageKillJobsEnqueued} kill jobs enqueued`);
-      
-      // Check if all objects already exist on this page
-      if (pageAllObjectsExist) {
-        allObjectsExistCount++;
-        console.log(`📝 Page ${page + 1}: All battles already exist in database`);
-      }
-      
       // If all battles on this page are older than cutoff and all objects exist, stop backfill
       if (allOlderThanCutoff && pageAllObjectsExist) {
-        console.log(`⏹️  All battles on page ${page + 1} are older than cutoff and already exist, stopping backfill`);
         break;
       }
       
       // Sleep between pages (except on the last page)
       if (page < maxPages - 1 && battles.length > 0) {
-        console.log(`⏸️  Sleeping for ${sleepMs}ms before next page...`);
         await sleep(sleepMs);
       }
     }
     
     const duration = Date.now() - startTime;
-    console.log(`\n✅ Backfill completed in ${duration}ms:`);
-    console.log(`  - Pages processed: ${pagesProcessed}`);
-    console.log(`  - Battles processed: ${totalBattlesProcessed}`);
-    console.log(`  - New battles: ${totalBattlesUpserted}`);
-    console.log(`  - Kill jobs enqueued: ${totalKillJobsEnqueued}`);
-    console.log(`  - Pages with all existing objects: ${allObjectsExistCount}`);
-    console.log(`\n💡 Note: Live watermark was NOT advanced during backfill`);
+    console.log(`✅ Backfill completed: ${totalBattlesUpserted} new battles, ${totalKillJobsEnqueued} kill jobs enqueued in ${duration}ms`);
     
   } catch (error) {
     console.error('❌ Backfill failed:', error);
@@ -261,20 +228,12 @@ async function main() {
     const { cutoff, pages, sleepMs } = parseArgs();
     
     console.log('🧪 Albion Backfill Tool');
-    console.log('📊 Configuration:', {
-      NODE_ENV: config.NODE_ENV,
-      API_BASE_URL: config.API_BASE_URL,
-      REDIS_URL: config.REDIS_URL ? '***configured***' : '❌ missing',
-      DATABASE_URL: config.DATABASE_URL ? '***configured***' : '❌ missing',
-    });
     
     // Test database connection
-    console.log('\n🔗 Testing database connection...');
     await prisma.$connect();
     console.log('✅ Database connection successful');
     
     // Run the backfill
-    console.log('\n🔄 Running backfill crawl...');
     await runBackfill(cutoff, pages, sleepMs);
     
   } catch (error) {
@@ -283,7 +242,6 @@ async function main() {
   } finally {
     // Always disconnect from database
     await prisma.$disconnect();
-    console.log('🔌 Database disconnected');
   }
 }
 

@@ -71,9 +71,6 @@ export class MmrService {
     battleAnalysis: BattleAnalysis
   ): Promise<Map<string, number>> {
     try {
-      console.log(
-        `🏆 [MMR-SERVICE] St aaarting MMR calculation for battle ${battleAnalysis.battleId}`
-      );
       logger.info("Starting MMR calculation for battle", {
         battleId: battleAnalysis.battleId.toString(),
         guildCount: battleAnalysis.guildStats.length,
@@ -82,36 +79,17 @@ export class MmrService {
       const mmrChanges = new Map<string, number>();
 
       // Calculate base MMR changes for each guild
-      console.log(
-        `🏆 [MMR-SERVICE] Calculating MMR changes for ${battleAnalysis.guildStats.length} guilds in battle ${battleAnalysis.battleId}`
-      );
       for (const guildStat of battleAnalysis.guildStats) {
-        console.log(
-          `🏆 [MMR-SERVICE] Calculating MMR for guild ${guildStat.guildName} in battle ${battleAnalysis.battleId}`
-        );
         const mmrChange = await this.calculateGuildMmrChange(
           guildStat,
           battleAnalysis
         );
         mmrChanges.set(guildStat.guildId, mmrChange);
-        console.log(
-          `📊 [MMR-SERVICE] Guild ${guildStat.guildName}: MMR change = ${mmrChange}`
-        );
       }
 
       // Apply opponent MMR strength adjustments
-      console.log(
-        `🏆 [MMR-SERVICE] Applying opponent strength adjustments for battle ${battleAnalysis.battleId}`
-      );
       this.adjustForOpponentStrength(mmrChanges, battleAnalysis);
 
-      console.log(
-        `✅ [MMR-SERVICE] Completed MMR calculation for battle ${battleAnalysis.battleId}`
-      );
-      console.log(
-        `📊 [MMR-SERVICE] Final MMR changes:`,
-        Object.fromEntries(mmrChanges)
-      );
       logger.info("Completed MMR calculation for battle", {
         battleId: battleAnalysis.battleId.toString(),
         mmrChanges: Object.fromEntries(mmrChanges),
@@ -382,22 +360,12 @@ export class MmrService {
     battleAnalysis: BattleAnalysis
   ): Promise<void> {
     try {
-      console.log(
-        `🏆 [GUILD-SEASON] Updating MMR for guild ${battleStats.guildName} (${guildId}) in season ${seasonId}`
-      );
-      console.log(
-        `📊 [GUILD-SEASON] MMR change: ${mmrChange}, Battle: ${battleAnalysis.battleId}`
-      );
-
       // Get or create guild season record
       let guildSeason = await this.prisma.guildSeason.findUnique({
         where: { guildId_seasonId: { guildId, seasonId } },
       });
 
       if (!guildSeason) {
-        console.log(
-          `🏆 [GUILD-SEASON] Creating new guild season record for guild ${battleStats.guildName} (${guildId}) in season ${seasonId}`
-        );
         // Create new guild season record
         guildSeason = await this.prisma.guildSeason.create({
           data: {
@@ -412,34 +380,16 @@ export class MmrService {
             primeTimeBattles: 0,
           },
         });
-        console.log(
-          `✅ [GUILD-SEASON] Created new guild season record for guild ${battleStats.guildName}`
-        );
-      } else {
-        console.log(
-          `📊 [GUILD-SEASON] Found existing guild season record for guild ${battleStats.guildName} (current MMR: ${guildSeason.currentMmr})`
-        );
       }
 
       // Calculate new MMR
       const newMmr = Math.max(0, guildSeason.currentMmr + mmrChange);
-      console.log(
-        `📊 [GUILD-SEASON] Guild ${battleStats.guildName}: ${guildSeason.currentMmr} + ${mmrChange} = ${newMmr}`
-      );
 
       // Determine win/loss
       const isWin =
         this.calculateWinLossFactor(battleStats, battleAnalysis) > 0;
-      console.log(
-        `📊 [GUILD-SEASON] Guild ${battleStats.guildName} battle result: ${
-          isWin ? "WIN" : "LOSS"
-        }`
-      );
 
       // Update guild season
-      console.log(
-        `🏆 [GUILD-SEASON] Updating guild season record for guild ${battleStats.guildName}`
-      );
       await this.prisma.guildSeason.update({
         where: { id: guildSeason.id },
         data: {
@@ -456,9 +406,6 @@ export class MmrService {
           lastBattleAt: new Date(),
         },
       });
-      console.log(
-        `✅ [GUILD-SEASON] Updated guild season record for guild ${battleStats.guildName} (new MMR: ${newMmr})`
-      );
 
       // Log detailed MMR calculation information
       await this.logMmrCalculation(
@@ -474,28 +421,12 @@ export class MmrService {
 
       // Update prime time mass if this is a prime time battle
       if (battleStats.isPrimeTime) {
-        console.log(
-          `🏆 [GUILD-SEASON] Updating prime time mass for guild ${battleStats.guildName} (${battleStats.players} players)`
-        );
         await this.updatePrimeTimeMass(
           guildSeason.id,
           battleStats.players,
           battleAnalysis.battleId
         );
-      } else {
-        console.log(
-          `📊 [GUILD-SEASON] Not a prime time battle for guild ${battleStats.guildName}, skipping mass update`
-        );
       }
-
-      console.log(
-        `✅ [GUILD-SEASON] Successfully updated guild season MMR for guild ${battleStats.guildName}`
-      );
-      console.log(`   - Old MMR: ${guildSeason.currentMmr}`);
-      console.log(`   - New MMR: ${newMmr}`);
-      console.log(`   - MMR Change: ${mmrChange}`);
-      console.log(`   - Result: ${isWin ? "WIN" : "LOSS"}`);
-      console.log(`   - Prime Time: ${battleStats.isPrimeTime}`);
 
       logger.info("Updated guild season MMR", {
         guildId,
@@ -985,27 +916,6 @@ export class MmrService {
           calculationVersion: "1.0",
         },
       });
-
-      console.log(
-        `📊 [MMR-LOG] Logged detailed MMR calculation for guild ${battleStats.guildName}`
-      );
-      console.log(
-        `   - Factors: Win/Loss=${winLossFactor.toFixed(
-          3
-        )}, Fame=${fameFactor.toFixed(3)}, Players=${playerCountFactor.toFixed(
-          3
-        )}`
-      );
-      console.log(
-        `   - Contributions: Win/Loss=${winLossContribution.toFixed(
-          3
-        )}, Fame=${fameContribution.toFixed(3)}`
-      );
-      console.log(
-        `   - Total Score: ${totalWeightedScore.toFixed(
-          3
-        )}, Final Change: ${mmrChange.toFixed(3)}`
-      );
 
       logger.debug("Logged MMR calculation details", {
         guildId,
