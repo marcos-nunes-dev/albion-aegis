@@ -50,7 +50,9 @@ const configSchema = z.object({
   DATABASE_IDLE_TIMEOUT: z.coerce.number().positive().default(60000),
   
   // Redis Cleanup Configuration
-  REDIS_CLEANUP_INTERVAL_MIN: z.coerce.number().positive().default(30),
+  REDIS_CLEANUP_INTERVAL_MIN: z.coerce.number().positive().default(15), // Reduced from 30 to 15 minutes
+  REDIS_HIGH_FREQ_CLEANUP_INTERVAL_MIN: z.coerce.number().positive().default(5),
+  REDIS_WORKER_CLEANUP_INTERVAL_MIN: z.coerce.number().positive().default(10),
 });
 
 // Parse and validate the configuration

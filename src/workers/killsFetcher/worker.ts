@@ -1,7 +1,7 @@
 import { Worker } from 'bullmq';
 import { getKillsForBattle } from '../../http/client.js';
 import { getPrisma, executeWithRetry } from '../../db/database.js';
-import { killsFetchQueue } from '../../queue/queues.js';
+import { killsFetchQueue, cleanupOldJobs } from '../../queue/queues.js';
 import { config } from '../../lib/config.js';
 import type { KillEvent } from '../../types/albion.js';
 import redis from '../../queue/connection.js';
@@ -84,8 +84,8 @@ export function createKillsFetcherWorker(): Worker {
     {
       connection: redis,
       concurrency: config.KILLS_WORKER_CONCURRENCY,
-      removeOnComplete: { count: 100 },   // Keep last 100 completed jobs (reduced for high volume)
-      removeOnFail: { count: 50 },        // Keep last 50 failed jobs (reduced for high volume)
+      removeOnComplete: { count: 50, age: 10 * 60 * 1000 },   // Keep last 50 or 10 minutes
+      removeOnFail: { count: 25, age: 10 * 60 * 1000 },      // Keep last 25 or 10 minutes
     }
   );
   
@@ -225,14 +225,27 @@ export function startKillsFetcherWorker(): Worker {
   
   const worker = createKillsFetcherWorker();
   
+  // Start automatic cleanup every 10 minutes
+  const cleanupInterval = setInterval(async () => {
+    try {
+      console.log('🧹 Kills worker performing automatic cleanup...');
+      await cleanupOldJobs();
+      console.log('✅ Kills worker cleanup completed');
+    } catch (error) {
+      console.error('❌ Kills worker cleanup failed:', error);
+    }
+  }, config.REDIS_WORKER_CLEANUP_INTERVAL_MIN * 60 * 1000);
+  
   // Graceful shutdown
   process.on('SIGTERM', async () => {
     console.log('🛑 Shutting down kills fetcher worker...');
+    clearInterval(cleanupInterval);
     await worker.close();
   });
   
   process.on('SIGINT', async () => {
     console.log('🛑 Shutting down kills fetcher worker...');
+    clearInterval(cleanupInterval);
     await worker.close();
   });
   

@@ -20,9 +20,9 @@ export const QUEUE_NAMES = {
 export const battleCrawlQueue = new Queue<BattleCrawlJobData>(QUEUE_NAMES.BATTLE_CRAWL, {
   connection: redis,
   defaultJobOptions: {
-    // Remove completed jobs after 1 hour
-    removeOnComplete: 100,
-    removeOnFail: 50,
+    // More aggressive cleanup for high-volume processing
+    removeOnComplete: { count: 50, age: 15 * 60 * 1000 }, // Keep last 50 or 15 minutes
+    removeOnFail: { count: 25, age: 15 * 60 * 1000 },     // Keep last 25 or 15 minutes
     // Retry failed jobs
     attempts: 3,
     backoff: {
@@ -36,9 +36,9 @@ export const battleCrawlQueue = new Queue<BattleCrawlJobData>(QUEUE_NAMES.BATTLE
 export const killsFetchQueue = new Queue<KillsFetchJobData>(QUEUE_NAMES.KILLS_FETCH, {
   connection: redis,
   defaultJobOptions: {
-    // Remove completed jobs after 1 hour (reduced from 24 hours)
-    removeOnComplete: 100,
-    removeOnFail: 50,
+    // More aggressive cleanup for high-volume processing
+    removeOnComplete: { count: 50, age: 10 * 60 * 1000 }, // Keep last 50 or 10 minutes
+    removeOnFail: { count: 25, age: 10 * 60 * 1000 },     // Keep last 25 or 10 minutes
     // Retry failed jobs more aggressively for kills
     attempts: 5,
     backoff: {
@@ -139,6 +139,48 @@ export async function aggressiveCleanup() {
     console.log('✅ Aggressive cleanup completed');
   } catch (error) {
     console.error('❌ Error during aggressive cleanup:', error);
+  }
+}
+
+export async function comprehensiveCleanup() {
+  console.log('🧹 Performing comprehensive cleanup...');
+  
+  try {
+    // Clean up jobs older than 1 minute (very aggressive)
+    const oneMinute = 1 * 60 * 1000;
+    
+    await Promise.all([
+      battleCrawlQueue.clean(oneMinute, 'completed' as any),
+      battleCrawlQueue.clean(oneMinute, 'failed' as any),
+      killsFetchQueue.clean(oneMinute, 'completed' as any),
+      killsFetchQueue.clean(oneMinute, 'failed' as any),
+    ]);
+    
+    // Also try cleaning with 0 age (all jobs)
+    await Promise.all([
+      battleCrawlQueue.clean(0, 'completed' as any),
+      battleCrawlQueue.clean(0, 'failed' as any),
+      killsFetchQueue.clean(0, 'completed' as any),
+      killsFetchQueue.clean(0, 'failed' as any),
+    ]);
+    
+    console.log('✅ Comprehensive cleanup completed');
+  } catch (error) {
+    console.error('❌ Error during comprehensive cleanup:', error);
+  }
+}
+
+export async function obliterateAllQueues() {
+  console.log('🧹 Obliterating all queues (DESTRUCTIVE OPERATION)...');
+  
+  try {
+    await Promise.all([
+      battleCrawlQueue.obliterate({ force: true }),
+      killsFetchQueue.obliterate({ force: true }),
+    ]);
+    console.log('✅ All queues obliterated');
+  } catch (error) {
+    console.error('❌ Error during queue obliteration:', error);
   }
 }
 
