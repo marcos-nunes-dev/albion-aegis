@@ -211,7 +211,7 @@ export class BattleAnalysisService {
 
   /**
    * Extract guild statistics from battle data
-   * Uses the guilds list from battle data instead of parsing kills
+   * Uses the guildsJson array from battle data
    */
   private async extractGuildStats(
     _battleId: bigint,
@@ -221,90 +221,33 @@ export class BattleAnalysisService {
     const guildStats: GuildBattleStats[] = [];
 
     try {
-      // Get guilds from battle data
-      let guildsData: any[] = [];
-      
-      // First try the raw battle data guilds array (from API response)
-      if (battleData.guilds && Array.isArray(battleData.guilds)) {
-        guildsData = battleData.guilds;
-      }
-      // Then try the processed guildsJson (from database)
-      else if (battleData.guildsJson && typeof battleData.guildsJson === 'object') {
-        // Convert guildsJson object to array format
-        const guildsJson = battleData.guildsJson;
-        
-        // Check if guildsJson is an array (from API response) or object (from database)
-        if (Array.isArray(guildsJson)) {
-          // The guildsJson contains corrupted data with numeric names, so we need to extract guild names from kills
-          guildsData = [];
-        } else {
-          // Handle object format - extract guild names properly
-          guildsData = Object.entries(guildsJson).map(([key, guildInfo]: [string, any]) => {
-            // The key might be a number, so we need to get the actual guild name from the guildInfo
-            const guildName = guildInfo.name || guildInfo.Name || key;
-            return {
-              name: guildName,
-              kills: guildInfo.kills || guildInfo.Kills || 0,
-              deaths: guildInfo.deaths || guildInfo.Deaths || 0,
-              killFame: guildInfo.killFame || guildInfo.KillFame || 0,
-              players: guildInfo.players || guildInfo.Players || 0,
-              ip: guildInfo.ip || guildInfo.IP || 1000
-            };
-          });
-        }
-      }
-      
-      // If no guilds found in battle data, extract from kills data as fallback
-      if (guildsData.length === 0) {
-        // Extract unique guild names from kills data
-        const guildNames = new Set<string>();
-        const guildKillStats = new Map<string, { kills: number; deaths: number; fameGained: number; fameLost: number }>();
-        
-        for (const kill of killsData) {
-          const killerGuild = this.extractGuildFromKill(kill, 'killer');
-          const victimGuild = this.extractGuildFromKill(kill, 'victim');
-          
-          if (killerGuild) {
-            guildNames.add(killerGuild);
-            const stats = guildKillStats.get(killerGuild) || { kills: 0, deaths: 0, fameGained: 0, fameLost: 0 };
-            stats.kills++;
-            stats.fameGained += kill.TotalVictimKillFame || 0;
-            guildKillStats.set(killerGuild, stats);
-          }
-          
-          if (victimGuild) {
-            guildNames.add(victimGuild);
-            const stats = guildKillStats.get(victimGuild) || { kills: 0, deaths: 0, fameGained: 0, fameLost: 0 };
-            stats.deaths++;
-            stats.fameLost += kill.TotalVictimKillFame || 0;
-            guildKillStats.set(victimGuild, stats);
-          }
-        }
-        
-        // Convert to guildsData format
-        guildsData = Array.from(guildNames).map(guildName => {
-          const stats = guildKillStats.get(guildName) || { kills: 0, deaths: 0, fameGained: 0, fameLost: 0 };
-          return {
-            name: guildName,
-            kills: stats.kills,
-            deaths: stats.deaths,
-            killFame: stats.fameGained,
-            players: 0, // We don't have player count from kills data
-            ip: 1000 // Default IP
-          };
+      // guildsJson is always an array of objects
+      if (!battleData.guildsJson || !Array.isArray(battleData.guildsJson)) {
+        logger.warn('guildsJson is not available or not an array', { 
+          hasGuildsJson: !!battleData.guildsJson,
+          isArray: Array.isArray(battleData.guildsJson)
         });
+        return [];
       }
 
-      // If we still don't have player counts, try to extract them from the players array in battle data
-      if (guildsData.length > 0 && guildsData.every(g => !g.players || g.players === 0)) {
-        const playerCountsByGuild = this.extractPlayerCountsFromPlayersArray(battleData);
-        
-        // Update guildsData with player counts
-        guildsData = guildsData.map(guild => ({
-          ...guild,
-          players: playerCountsByGuild.get(guild.name) || 0
-        }));
-      }
+      const guildsData = battleData.guildsJson.map((guild: any) => ({
+        name: guild.name || '',
+        kills: guild.kills || 0,
+        deaths: guild.deaths || 0,
+        killFame: guild.killFame || 0,
+        players: guild.players || 0,
+        ip: guild.ip || 1000,
+        albionId: guild.albionId || ''
+      }));
+
+      logger.debug('Parsed guildsJson array', { 
+        guildCount: guildsData.length,
+        sampleGuild: guildsData[0] ? {
+          name: guildsData[0].name,
+          players: guildsData[0].players,
+          ip: guildsData[0].ip
+        } : null
+      });
 
       // Process each guild from battle data
       for (const guild of guildsData) {
@@ -312,32 +255,38 @@ export class BattleAnalysisService {
           continue;
         }
 
-        // Get or create guild in database
-        const guildEntity = await this.guildService.getOrCreateGuild(guild.name);
+        // Get or create guild in database using albionId if available
+        const guildEntity = await this.findGuildByIdOrName(guild.albionId, guild.name);
         
-        // Use guild IP from battle data (now complete), fallback to kills data if needed
-        let avgIP = guild.ip || 0;
-        
-        if (!avgIP || avgIP === 0) {
-          // Only calculate from kills data if guild IP is not available
-          avgIP = this.calculateAverageIP(guild.name, killsData);
-        }
+        // Use guild IP directly from guildsJson, but handle 0 values
+        const avgIP = guild.ip > 0 ? guild.ip : 1000;
 
-        // Create guild stats from battle data
+        // Create guild stats from guildsJson data
         const guildStat: GuildBattleStats = {
           guildName: guild.name,
           guildId: guildEntity.id,
-          kills: guild.kills || 0,
-          deaths: guild.deaths || 0,
-          fameGained: guild.killFame || 0,
+          kills: guild.kills,
+          deaths: guild.deaths,
+          fameGained: guild.killFame,
           fameLost: 0, // Will be calculated from kills data if needed
-          players: guild.players || 0,
-          avgIP: avgIP || 1000, // Use guild IP from battle data, fallback to calculated or default
+          players: guild.players,
+          avgIP: avgIP,
           isPrimeTime: false, // Will be set later
           currentMmr: 1000.0 // Will be updated later
         };
 
-        // If we have kills data, we can cross-reference to get more accurate fame lost
+        // Log the extracted guild data for debugging
+        logger.debug('Extracted guild stats from guildsJson', {
+          guildName: guild.name,
+          players: guild.players,
+          avgIP: guild.ip,
+          finalAvgIP: avgIP,
+          kills: guild.kills,
+          deaths: guild.deaths,
+          killFame: guild.killFame
+        });
+
+        // Calculate fame lost from kills data
         if (killsData.length > 0) {
           const guildKills = killsData.filter(kill => 
             this.extractGuildFromKill(kill, 'killer') === guild.name ||
@@ -354,6 +303,19 @@ export class BattleAnalysisService {
 
         guildStats.push(guildStat);
       }
+
+      logger.info('Extracted guild stats from battle data', {
+        totalGuilds: guildStats.length,
+        guildsWithPlayers: guildStats.filter(g => g.players > 0).length,
+        guildsWithIP: guildStats.filter(g => g.avgIP > 1000).length,
+        sampleGuild: guildStats[0] ? {
+          name: guildStats[0].guildName,
+          players: guildStats[0].players,
+          avgIP: guildStats[0].avgIP,
+          kills: guildStats[0].kills,
+          deaths: guildStats[0].deaths
+        } : null
+      });
 
       return guildStats;
 
@@ -395,40 +357,7 @@ export class BattleAnalysisService {
 
 
 
-  /**
-   * Calculate average IP for a guild
-   * Handles both raw API response format and processed database format
-   */
-  private calculateAverageIP(guildName: string, killsData: any[]): number {
-    const guildKills = killsData.filter(kill => 
-      this.extractGuildFromKill(kill, 'killer') === guildName ||
-      this.extractGuildFromKill(kill, 'victim') === guildName
-    );
 
-    if (guildKills.length === 0) return 1000; // Default IP
-
-    const totalIP = guildKills.reduce((sum, kill) => {
-      // Try processed database format first
-      let killerIP = kill.killerAvgIP;
-      let victimIP = kill.victimAvgIP;
-      
-      // Try raw API response format if database format not found
-      if (killerIP === undefined && kill.Killer?.AverageItemPower !== undefined) {
-        killerIP = kill.Killer.AverageItemPower;
-      }
-      if (victimIP === undefined && kill.Victim?.AverageItemPower !== undefined) {
-        victimIP = kill.Victim.AverageItemPower;
-      }
-      
-      // Use defaults if still undefined
-      killerIP = killerIP || 1000;
-      victimIP = victimIP || 1000;
-      
-      return sum + killerIP + victimIP;
-    }, 0);
-
-    return Math.round(totalIP / (guildKills.length * 2));
-  }
 
   /**
    * Calculate kill clustering score - improved algorithm
@@ -668,32 +597,50 @@ export class BattleAnalysisService {
     );
   }
 
-  /**
-   * Extract player counts from the players array in battle data
-   * This method counts how many players belong to each guild based on the players array
-   */
-  private extractPlayerCountsFromPlayersArray(battleData: any): Map<string, number> {
-    const playerCountsByGuild = new Map<string, number>();
 
+
+  /**
+   * Find guild by ID or name, creating it if necessary
+   */
+  private async findGuildByIdOrName(albionId: string, guildName: string): Promise<any> {
     try {
-      // Check if we have a players array in the battle data
-      if (battleData.players && Array.isArray(battleData.players)) {
-        // Count players by guild
-        for (const player of battleData.players) {
-          const guildName = player.guildName || player.GuildName;
-          if (guildName) {
-            const currentCount = playerCountsByGuild.get(guildName) || 0;
-            playerCountsByGuild.set(guildName, currentCount + 1);
-          }
-        }
+      // First try to find by ID
+      let guild = await this.prisma.guild.findUnique({
+        where: { id: albionId }
+      });
+
+      if (guild) {
+        logger.debug('Found guild by ID', { albionId, guildName: guild.name });
+        return guild;
       }
+
+      // If not found by ID, try by name
+      guild = await this.prisma.guild.findUnique({
+        where: { name: guildName }
+      });
+
+      if (guild) {
+        logger.debug('Found guild by name', { albionId, guildName: guild.name });
+        return guild;
+      }
+
+      // If not found, create new guild with the albionId
+      logger.info('Creating new guild with albionId', { albionId, guildName });
+      return await this.prisma.guild.create({
+        data: {
+          id: albionId,
+          name: guildName
+        }
+      });
     } catch (error) {
-      logger.error('Error extracting player counts from players array', {
+      logger.error('Error in findGuildByIdOrName', {
+        albionId,
+        guildName,
         error: error instanceof Error ? error.message : 'Unknown error'
       });
+      // Fallback to regular guild service
+      return await this.guildService.getOrCreateGuild(guildName);
     }
-
-    return playerCountsByGuild;
   }
 
   /**
