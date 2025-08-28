@@ -3,7 +3,6 @@ import { MmrIntegrationService } from '../src/services/mmrIntegration.js';
 import { SeasonService } from '../src/services/season.js';
 import { GuildService } from '../src/services/guild.js';
 import { MmrService } from '../src/services/mmr.js';
-import { config } from '../src/lib/config.js';
 
 const mmrIntegration = new MmrIntegrationService(prisma);
 const seasonService = new SeasonService(prisma);
@@ -86,7 +85,7 @@ async function createSeason(args: string[]) {
   const startDate = new Date(startDateStr);
   const endDate = endDateStr ? new Date(endDateStr) : undefined;
 
-  const season = await seasonService.createSeason(name, startDate, endDate);
+  await seasonService.createSeason(name, startDate, endDate);
   console.log('✅ Season created successfully');
 }
 

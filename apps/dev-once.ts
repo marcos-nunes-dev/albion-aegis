@@ -1,5 +1,4 @@
 import { runBattleCrawl } from '../src/workers/battleCrawler/producer.js';
-import { config } from '../src/lib/config.js';
 import { prisma } from '../src/db/prisma.js';
 
 console.log('🧪 Albion Dev Once - Single Crawl Test');
