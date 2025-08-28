@@ -41,6 +41,7 @@ export interface GuildBattleStats {
   isPrimeTime: boolean;
   currentMmr: number;
   previousSeasonMmr?: number;
+  killClustering: number; // Per-guild kill clustering score
 }
 
 export interface BattleAnalysis {
@@ -150,7 +151,7 @@ export class MmrService {
       totalMmrChange += durationFactor * MMR_CONSTANTS.BATTLE_DURATION_WEIGHT;
 
       // 8. Kill clustering factor (5% weight)
-      const clusteringFactor = this.calculateClusteringFactor(battleAnalysis);
+      const clusteringFactor = this.calculateClusteringFactor(guildStat);
       totalMmrChange += clusteringFactor * MMR_CONSTANTS.KILL_CLUSTERING_WEIGHT;
 
       // Apply K-factor and ensure reasonable bounds
@@ -297,12 +298,12 @@ export class MmrService {
   }
 
   /**
-   * Calculate kill clustering factor (0 to 1)
+   * Calculate kill clustering factor (0 to 1) for a specific guild
    */
-  private calculateClusteringFactor(battleAnalysis: BattleAnalysis): number {
+  private calculateClusteringFactor(guildStat: GuildBattleStats): number {
     // The improved clustering algorithm returns a more sophisticated score
     // Normalize it to 0-1 range, with better scaling for the new algorithm
-    const baseScore = battleAnalysis.killClustering;
+    const baseScore = guildStat.killClustering;
 
     // New algorithm can return higher scores, so adjust normalization
     // A score of 10+ indicates significant clustering
@@ -806,7 +807,7 @@ export class MmrService {
       const battleSizeFactor = this.calculateBattleSizeFactor(battleAnalysis);
       const kdFactor = this.calculateKdFactor(battleStats);
       const durationFactor = this.calculateDurationFactor(battleAnalysis);
-      const clusteringFactor = this.calculateClusteringFactor(battleAnalysis);
+      const clusteringFactor = this.calculateClusteringFactor(battleStats);
 
       // Calculate weighted contributions
       const winLossContribution = winLossFactor * MMR_CONSTANTS.WIN_LOSS_WEIGHT;
@@ -877,7 +878,7 @@ export class MmrService {
           totalBattlePlayers: battleAnalysis.totalPlayers,
           totalBattleFame: BigInt(battleAnalysis.totalFame),
           battleDuration: battleAnalysis.battleDuration,
-          killClustering: battleAnalysis.killClustering,
+          killClustering: battleStats.killClustering,
 
           // MMR calculation factors
           winLossFactor,

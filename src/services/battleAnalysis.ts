@@ -71,7 +71,7 @@ export class BattleAnalysisService {
         totalFame,
         battleDuration,
         isPrimeTime: await this.seasonService.isPrimeTime(season.id, battleDate),
-        killClustering: this.calculateKillClustering(killsData),
+        killClustering: 0, // Placeholder - will be calculated per guild
         friendGroups: this.detectFriendGroups(guildStats, killsData)
       };
       
@@ -92,8 +92,7 @@ export class BattleAnalysisService {
       // Calculate prime time status
       const isPrimeTime = await this.seasonService.isPrimeTime(season.id, battleDate);
 
-      // Calculate kill clustering
-      const killClustering = this.calculateKillClustering(killsData);
+      // Calculate kill clustering per guild (will be done in extractGuildStats)
 
       // Detect friend groups
       const friendGroups = this.detectFriendGroups(significantGuildStats, killsData);
@@ -112,7 +111,7 @@ export class BattleAnalysisService {
         totalFame,
         battleDuration,
         isPrimeTime,
-        killClustering,
+        killClustering: 0, // Will be calculated per guild, this is just a placeholder
         friendGroups,
         guildAlliances
       };
@@ -261,6 +260,9 @@ export class BattleAnalysisService {
         // Use guild IP directly from guildsJson, but handle 0 values
         const avgIP = guild.ip > 0 ? guild.ip : 1000;
 
+        // Calculate kill clustering for this specific guild
+        const guildKillClustering = this.calculateGuildKillClustering(guild.name, killsData);
+
         // Create guild stats from guildsJson data
         const guildStat: GuildBattleStats = {
           guildName: guild.name,
@@ -272,7 +274,8 @@ export class BattleAnalysisService {
           players: guild.players,
           avgIP: avgIP,
           isPrimeTime: false, // Will be set later
-          currentMmr: 1000.0 // Will be updated later
+          currentMmr: 1000.0, // Will be updated later
+          killClustering: guildKillClustering // Per-guild kill clustering score
         };
 
         // Log the extracted guild data for debugging
@@ -360,23 +363,35 @@ export class BattleAnalysisService {
 
 
   /**
-   * Calculate kill clustering score - improved algorithm
+   * Calculate kill clustering score for a specific guild - improved algorithm
    */
-  private calculateKillClustering(killsData: any[]): number {
+  private calculateGuildKillClustering(guildName: string, killsData: any[]): number {
     if (killsData.length < 2) return 0;
 
+    // Filter kills for this specific guild (kills where this guild was the killer)
+    const guildKills = killsData.filter(kill => 
+      this.extractGuildFromKill(kill, 'killer') === guildName
+    );
+
+    if (guildKills.length === 0) return 0;
+    if (guildKills.length === 1) return 1; // Single kill gets base score
+
     // Sort kills by timestamp
-    const sortedKills = killsData
+    const sortedKills = guildKills
       .filter(kill => kill.TimeStamp)
       .sort((a, b) => new Date(a.TimeStamp).getTime() - new Date(b.TimeStamp).getTime());
 
-    if (sortedKills.length < 2) return 0;
+    if (sortedKills.length === 0) return 0;
+    if (sortedKills.length === 1) return 1;
 
     const battleStartTime = new Date(sortedKills[0].TimeStamp).getTime();
     const battleEndTime = new Date(sortedKills[sortedKills.length - 1].TimeStamp).getTime();
     const battleDuration = (battleEndTime - battleStartTime) / (1000 * 60); // in minutes
 
     let totalClusteringScore = 0;
+
+    // Base score for number of kills (more kills = higher base score)
+    const baseKillScore = Math.min(10, sortedKills.length * 2); // 2 points per kill, max 10
 
     // 1. Analyze rapid kill sequences (30-second windows)
     const rapidKillScore = this.analyzeRapidKills(sortedKills, 30);
@@ -390,29 +405,38 @@ export class BattleAnalysisService {
     // 4. Analyze kill streaks (consecutive kills by same guild)
     const killStreakScore = this.analyzeKillStreaks(sortedKills);
 
+    // 5. Analyze kill timing patterns (how spread out the kills are)
+    const timingPatternScore = this.analyzeKillTimingPatterns(sortedKills);
+
     // Combine scores with weights
     totalClusteringScore = 
-      (rapidKillScore * 0.3) +           // 30% weight for rapid kills
-      (coordinatedAttackScore * 0.3) +   // 30% weight for coordinated attacks
-      (highValueScore * 0.25) +          // 25% weight for high-value kills
-      (killStreakScore * 0.15);          // 15% weight for kill streaks
+      baseKillScore +                           // Base score for number of kills
+      (rapidKillScore * 0.25) +                 // 25% weight for rapid kills
+      (coordinatedAttackScore * 0.2) +          // 20% weight for coordinated attacks
+      (highValueScore * 0.2) +                  // 20% weight for high-value kills
+      (killStreakScore * 0.15) +                // 15% weight for kill streaks
+      (timingPatternScore * 0.2);               // 20% weight for timing patterns
 
-    // Normalize based on battle duration and size
-    const normalizationFactor = Math.min(1, battleDuration / 10); // Longer battles get more weight
-    const normalizedScore = totalClusteringScore * normalizationFactor;
+    // Normalize based on battle duration (longer battles get slight bonus)
+    const durationBonus = Math.min(0.5, battleDuration / 20); // Max 0.5 bonus
+    const finalScore = totalClusteringScore + durationBonus;
 
     logger.debug('Calculated kill clustering score', {
+      guildName,
+      killCount: sortedKills.length,
+      baseKillScore,
       rapidKillScore,
       coordinatedAttackScore,
       highValueScore,
       killStreakScore,
+      timingPatternScore,
       totalClusteringScore,
       battleDuration,
-      normalizationFactor,
-      normalizedScore
+      durationBonus,
+      finalScore
     });
 
-    return Math.round(normalizedScore);
+    return Math.round(finalScore);
   }
 
   /**
@@ -436,27 +460,21 @@ export class BattleAnalysisService {
 
   /**
    * Analyze coordinated attacks (multiple guilds killing in sequence)
+   * For guild-specific clustering, this becomes less relevant since we're only looking at one guild's kills
    */
   private analyzeCoordinatedAttacks(sortedKills: any[], windowSeconds: number): number {
     let coordinatedScore = 0;
     const windowMs = windowSeconds * 1000;
 
-    for (let i = 0; i < sortedKills.length - 2; i++) {
+    // For guild-specific clustering, we look for rapid kill sequences by the same guild
+    // This indicates the guild was actively engaged in combat
+    for (let i = 0; i < sortedKills.length - 1; i++) {
       const time1 = new Date(sortedKills[i].TimeStamp).getTime();
-      const time3 = new Date(sortedKills[i + 2].TimeStamp).getTime();
+      const time2 = new Date(sortedKills[i + 1].TimeStamp).getTime();
 
-      // Check if 3 kills happened within the window
-      if (time3 - time1 <= windowMs) {
-        const guild1 = this.extractGuildFromKill(sortedKills[i], 'killer');
-        const guild2 = this.extractGuildFromKill(sortedKills[i + 1], 'killer');
-        const guild3 = this.extractGuildFromKill(sortedKills[i + 2], 'killer');
-
-        // If different guilds are killing in sequence, it's coordinated
-        if (guild1 && guild2 && guild3 && guild1 !== guild2 && guild2 !== guild3) {
-          coordinatedScore += 2; // Higher weight for coordinated attacks
-        } else if (guild1 && guild2 && guild1 !== guild2) {
-          coordinatedScore += 1;
-        }
+      // Check if 2 kills happened within the window
+      if (time2 - time1 <= windowMs) {
+        coordinatedScore += 1; // Each rapid kill sequence adds to the score
       }
     }
 
@@ -494,25 +512,37 @@ export class BattleAnalysisService {
 
   /**
    * Analyze kill streaks (consecutive kills by same guild)
+   * Since we're now analyzing guild-specific kills, this becomes the total number of kills
+   * as all kills in the filtered data are from the same guild
    */
   private analyzeKillStreaks(sortedKills: any[]): number {
-    let maxStreak = 0;
-    let currentStreak = 0;
-    let currentGuild = '';
+    // Since all kills are from the same guild, the streak is the total number of kills
+    return sortedKills.length;
+  }
 
-    for (const kill of sortedKills) {
-      const killerGuild = this.extractGuildFromKill(kill, 'killer');
-      
-      if (killerGuild === currentGuild) {
-        currentStreak++;
-        maxStreak = Math.max(maxStreak, currentStreak);
-      } else {
-        currentStreak = 1;
-        currentGuild = killerGuild || '';
-      }
+  /**
+   * Analyze kill timing patterns (how spread out the kills are)
+   * This rewards guilds that have more complex timing patterns
+   */
+  private analyzeKillTimingPatterns(sortedKills: any[]): number {
+    if (sortedKills.length < 2) return 0;
+
+    const timestamps = sortedKills.map(kill => new Date(kill.TimeStamp).getTime());
+    const intervals = [];
+
+    // Calculate time intervals between kills
+    for (let i = 1; i < timestamps.length; i++) {
+      intervals.push(timestamps[i] - timestamps[i - 1]);
     }
 
-    return maxStreak;
+    // Calculate variance in timing (more variance = more complex pattern)
+    const avgInterval = intervals.reduce((sum, interval) => sum + interval, 0) / intervals.length;
+    const variance = intervals.reduce((sum, interval) => sum + Math.pow(interval - avgInterval, 2), 0) / intervals.length;
+    
+    // Normalize variance to a reasonable score (0-5 range)
+    const timingScore = Math.min(5, Math.sqrt(variance) / 10000); // Adjust divisor as needed
+
+    return timingScore;
   }
 
   /**
