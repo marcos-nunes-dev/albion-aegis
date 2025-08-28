@@ -9,12 +9,9 @@ const redis = new Redis(config.REDIS_URL, {
   connectTimeout: 30000, // Increased from 10s to 30s
   commandTimeout: 30000, // Increased from 5s to 30s
   // High volume optimizations
-  retryDelayOnFailover: 100,
   enableReadyCheck: true,
   // Connection pooling for high volume
   family: 4, // Force IPv4
-  // Memory optimization
-  maxLoadingTimeout: 30000,
 });
 
 // Connection event handlers
