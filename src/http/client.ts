@@ -13,6 +13,7 @@ import { GuildSearchResponse, safeParseGuildSearchResponse } from '../types/mmr.
 import { recordRateLimit, recordSuccess } from '../scheduler/crawlLoop.js';
 import { httpLogger } from '../log.js';
 import { metrics } from '../metrics.js';
+import { discordService } from '../services/discord.js';
 
 // Rate limiting tracking
 const RATE_LIMIT_WINDOW_SIZE = 200; // Track last 200 requests
@@ -181,6 +182,10 @@ async function makeRequest(url: string, attempt: number = 1): Promise<any> {
       metrics.recordError('api', statusCode);
       rateLimitTracker.recordRequest(true); // Rate limited
       recordRateLimit(); // Record rate limit for slowdown logic
+      
+      // Track rate limiting with Discord
+      await discordService.trackRateLimit(undefined, retryAfter);
+      
       throw new RateLimitError(retryAfter);
     }
 
@@ -188,13 +193,23 @@ async function makeRequest(url: string, attempt: number = 1): Promise<any> {
     if (statusCode >= 500) {
       httpLogger.error('Server error', { statusCode, url });
       metrics.recordError('api', statusCode);
-      throw new AlbionAPIError(`Server error: ${statusCode}`, statusCode, undefined, true);
+      
+      // Track API errors with Discord
+      const error = new AlbionAPIError(`Server error: ${statusCode}`, statusCode, undefined, true);
+      await discordService.trackApiError(error, url, statusCode);
+      
+      throw error;
     }
 
     // Handle client errors (non-retryable)
     httpLogger.error('Client error', { statusCode, url });
     metrics.recordError('api', statusCode);
-    throw new AlbionAPIError(`Client error: ${statusCode}`, statusCode, undefined, false);
+    
+    // Track API errors with Discord
+    const error = new AlbionAPIError(`Client error: ${statusCode}`, statusCode, undefined, false);
+    await discordService.trackApiError(error, url, statusCode);
+    
+    throw error;
 
   } catch (error) {
     // Handle network errors
@@ -202,6 +217,11 @@ async function makeRequest(url: string, attempt: number = 1): Promise<any> {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
       httpLogger.error('Network error', { error: errorMessage, url });
       metrics.recordError('api', 0); // Network errors don't have status codes
+      
+      // Track network errors with Discord
+      const networkError = new Error(`Network error: ${errorMessage}`);
+      await discordService.trackNetworkError(networkError, url);
+      
       throw new AlbionAPIError(`Network error: ${errorMessage}`, undefined, undefined, true);
     }
     throw error;

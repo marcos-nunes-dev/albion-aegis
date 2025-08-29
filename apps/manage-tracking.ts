@@ -2,7 +2,7 @@
 
 import { prisma } from '../src/db/prisma.js';
 import { TrackingService } from '../src/services/tracking.js';
-import { DiscordWebhookService } from '../src/services/discord.js';
+import { discordService } from '../src/services/discord.js';
 import { log } from '../src/log.js';
 
 const logger = log.child({ component: 'manage-tracking' });
@@ -79,16 +79,18 @@ async function addSubscription() {
 
     // Test webhook
     console.log('\n🔧 Testing Discord webhook...');
-    const discordService = new DiscordWebhookService(webhookUrl);
-    const success = await discordService.testConnection();
-    
-    if (success) {
+    try {
+      await discordService.sendErrorAlert({
+        category: 'api_error' as any,
+        severity: 'low' as any,
+        title: '🔧 Webhook Test',
+        description: 'Discord webhook test successful!',
+        timestamp: new Date()
+      });
       console.log('✅ Discord webhook test successful!');
-    } else {
+    } catch (error) {
       console.log('❌ Discord webhook test failed. Please check your webhook URL.');
     }
-
-    discordService.destroy();
 
   } catch (error) {
     console.log('❌ Failed to create subscription:', error instanceof Error ? error.message : String(error));
@@ -174,16 +176,18 @@ async function testWebhook() {
     }
 
     console.log(`🔧 Testing webhook for ${subscription.entityName}...`);
-    const discordService = new DiscordWebhookService(subscription.discordWebhook);
-    const success = await discordService.testConnection();
-    
-    if (success) {
+    try {
+      await discordService.sendErrorAlert({
+        category: 'api_error' as any,
+        severity: 'low' as any,
+        title: '🔧 Webhook Test',
+        description: `Discord webhook test for ${subscription.entityName} successful!`,
+        timestamp: new Date()
+      });
       console.log('✅ Discord webhook test successful!');
-    } else {
+    } catch (error) {
       console.log('❌ Discord webhook test failed. Please check your webhook URL.');
     }
-
-    discordService.destroy();
   } catch (error) {
     console.log('❌ Failed to test webhook:', error instanceof Error ? error.message : String(error));
     process.exit(1);
