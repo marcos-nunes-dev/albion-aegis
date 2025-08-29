@@ -8,15 +8,16 @@ const logger = log.child({ component: "mmr-service" });
 const MMR_CONSTANTS = {
   BASE_MMR: 1000.0,
   K_FACTOR: 32, // How much MMR can change in a single battle
-  WIN_LOSS_WEIGHT: 0.4, // 40% weight for win/loss
-  FAME_WEIGHT: 0.2, // 20% weight for fame differential
-  PLAYER_COUNT_WEIGHT: 0.1, // 10% weight for player count advantage
-  IP_WEIGHT: 0.1, // 10% weight for IP level differences
+  WIN_LOSS_WEIGHT: 0.35, // 35% weight for win/loss (reduced from 40%)
+  FAME_WEIGHT: 0.15, // 15% weight for fame differential (reduced from 20%)
+  PLAYER_COUNT_WEIGHT: 0.25, // 25% weight for player count advantage (increased from 10%)
+  IP_WEIGHT: 0.05, // 5% weight for IP level differences (reduced from 10%)
   BATTLE_SIZE_WEIGHT: 0.05, // 5% weight for battle size
   KD_RATIO_WEIGHT: 0.05, // 5% weight for kill/death ratio
-  BATTLE_DURATION_WEIGHT: 0.05, // 5% weight for battle duration
-  KILL_CLUSTERING_WEIGHT: 0.05, // 5% weight for kill clustering
-  OPPONENT_MMR_WEIGHT: 0.1, // 10% weight for opponent MMR strength
+  BATTLE_DURATION_WEIGHT: 0.03, // 3% weight for battle duration (reduced from 5%)
+  KILL_CLUSTERING_WEIGHT: 0.02, // 2% weight for kill clustering (reduced from 5%)
+  OPPONENT_MMR_WEIGHT: 0.15, // 15% weight for opponent MMR strength (reduced from 20%)
+  INDIVIDUAL_PERFORMANCE_WEIGHT: 0.15, // 15% weight for individual guild performance within alliance (increased from 10%)
   FRIEND_DETECTION_THRESHOLD: 0.1, // 10% of total kills to consider as friend
   MIN_BATTLE_SIZE: 25, // Minimum players for MMR calculation
   MIN_BATTLE_FAME: 2000000, // Minimum fame for MMR calculation (2M)
@@ -27,6 +28,12 @@ const MMR_CONSTANTS = {
   MIN_PLAYER_RATIO: 0.01, // 1% of total battle players for participation
   // Alliance participation bonus (guilds from same alliance get more lenient thresholds)
   ALLIANCE_PARTICIPATION_BONUS: 0.5, // 50% bonus for participating in major alliances
+  // New constants for improved calculation
+  PLAYER_COUNT_PENALTY_THRESHOLD: 1.5, // 50% more players triggers penalty
+  PLAYER_COUNT_BONUS_THRESHOLD: 0.7, // 30% fewer players triggers bonus
+  OPPONENT_MMR_DIFFERENCE_THRESHOLD: 100, // 100 MMR difference for significant impact
+  MAX_MMR_GAIN_FOR_EASY_WIN: 25, // Maximum points for easy wins (increased to allow difficult wins)
+  MIN_MMR_LOSS_FOR_LOSS: 8, // Minimum points lost for losses
 } as const;
 
 export interface GuildBattleStats {
@@ -88,9 +95,6 @@ export class MmrService {
         mmrChanges.set(guildStat.guildId, mmrChange);
       }
 
-      // Apply opponent MMR strength adjustments
-      this.adjustForOpponentStrength(mmrChanges, battleAnalysis);
-
       logger.info("Completed MMR calculation for battle", {
         battleId: battleAnalysis.battleId.toString(),
         mmrChanges: Object.fromEntries(mmrChanges),
@@ -116,25 +120,25 @@ export class MmrService {
     try {
       let totalMmrChange = 0;
 
-      // 1. Win/Loss factor (40% weight)
+      // 1. Win/Loss factor (35% weight)
       const winLossFactor = this.calculateWinLossFactor(
         guildStat,
         battleAnalysis
       );
       totalMmrChange += winLossFactor * MMR_CONSTANTS.WIN_LOSS_WEIGHT;
 
-      // 2. Fame differential factor (20% weight)
+      // 2. Fame differential factor (15% weight)
       const fameFactor = this.calculateFameFactor(guildStat, battleAnalysis);
       totalMmrChange += fameFactor * MMR_CONSTANTS.FAME_WEIGHT;
 
-      // 3. Player count advantage factor (10% weight)
+      // 3. Player count advantage factor (25% weight)
       const playerCountFactor = this.calculatePlayerCountFactor(
         guildStat,
         battleAnalysis
       );
       totalMmrChange += playerCountFactor * MMR_CONSTANTS.PLAYER_COUNT_WEIGHT;
 
-      // 4. IP level factor (10% weight)
+      // 4. IP level factor (5% weight)
       const ipFactor = this.calculateIpFactor(guildStat, battleAnalysis);
       totalMmrChange += ipFactor * MMR_CONSTANTS.IP_WEIGHT;
 
@@ -146,22 +150,47 @@ export class MmrService {
       const kdFactor = this.calculateKdFactor(guildStat);
       totalMmrChange += kdFactor * MMR_CONSTANTS.KD_RATIO_WEIGHT;
 
-      // 7. Battle duration factor (5% weight)
+      // 7. Battle duration factor (3% weight)
       const durationFactor = this.calculateDurationFactor(battleAnalysis);
       totalMmrChange += durationFactor * MMR_CONSTANTS.BATTLE_DURATION_WEIGHT;
 
-      // 8. Kill clustering factor (5% weight)
+      // 8. Kill clustering factor (2% weight)
       const clusteringFactor = this.calculateClusteringFactor(guildStat);
       totalMmrChange += clusteringFactor * MMR_CONSTANTS.KILL_CLUSTERING_WEIGHT;
 
+      // 9. Opponent strength factor (20% weight) - NEW
+      const opponentStrengthFactor = this.calculateOpponentStrengthFactor(
+        guildStat,
+        battleAnalysis
+      );
+      totalMmrChange += opponentStrengthFactor * MMR_CONSTANTS.OPPONENT_MMR_WEIGHT;
+
+      // 10. Individual performance factor (10% weight) - NEW
+      const individualPerformanceFactor = this.calculateIndividualPerformanceFactor(
+        guildStat,
+        battleAnalysis
+      );
+      totalMmrChange += individualPerformanceFactor * MMR_CONSTANTS.INDIVIDUAL_PERFORMANCE_WEIGHT;
+
       // Apply K-factor and ensure reasonable bounds
-      const finalMmrChange = Math.max(
+      let finalMmrChange = Math.max(
         -MMR_CONSTANTS.K_FACTOR,
         Math.min(
           MMR_CONSTANTS.K_FACTOR,
           totalMmrChange * MMR_CONSTANTS.K_FACTOR
         )
       );
+
+      // Apply additional constraints for easy wins and losses
+      const isWin = this.calculateWinLossFactor(guildStat, battleAnalysis) > 0;
+      
+      if (isWin && finalMmrChange > 0) {
+        // Cap easy wins to prevent excessive MMR gain
+        finalMmrChange = Math.min(finalMmrChange, MMR_CONSTANTS.MAX_MMR_GAIN_FOR_EASY_WIN);
+      } else if (!isWin && finalMmrChange < 0) {
+        // Ensure losses lose a minimum amount of points
+        finalMmrChange = Math.min(finalMmrChange, -MMR_CONSTANTS.MIN_MMR_LOSS_FOR_LOSS);
+      }
 
       logger.debug("Calculated MMR change for guild", {
         guildName: guildStat.guildName,
@@ -175,6 +204,8 @@ export class MmrService {
           kd: kdFactor,
           duration: durationFactor,
           clustering: clusteringFactor,
+          opponentStrength: opponentStrengthFactor,
+          individualPerformance: individualPerformanceFactor,
         },
       });
 
@@ -228,19 +259,71 @@ export class MmrService {
 
   /**
    * Calculate player count advantage factor (-1 to 1)
+   * More aggressive penalties for player count advantages
+   * Now considers alliance groupings for more accurate calculations
    */
   private calculatePlayerCountFactor(
     guildStat: GuildBattleStats,
     battleAnalysis: BattleAnalysis
   ): number {
+    // First, try to calculate based on alliance groupings if available
+    if (battleAnalysis.guildAlliances) {
+      const guildAlliance = battleAnalysis.guildAlliances.get(guildStat.guildName);
+      if (guildAlliance) {
+        // Calculate alliance totals
+        const allianceGuilds = battleAnalysis.guildStats.filter(g => 
+          battleAnalysis.guildAlliances?.get(g.guildName) === guildAlliance
+        );
+        const alliancePlayers = allianceGuilds.reduce((sum, g) => sum + g.players, 0);
+        
+        // Calculate opponent alliance totals
+        const opponentPlayers = battleAnalysis.guildStats
+          .filter(g => {
+            const alliance = battleAnalysis.guildAlliances?.get(g.guildName);
+            return alliance && alliance !== guildAlliance;
+          })
+          .reduce((sum, g) => sum + g.players, 0);
+        
+        if (opponentPlayers > 0) {
+          const allianceRatio = alliancePlayers / opponentPlayers;
+          
+          // Apply underdog bonuses and advantage penalties based on alliance totals
+          if (allianceRatio >= 2.0) return -1.0; // Severe penalty for 2x+ advantage
+          if (allianceRatio >= 1.5) return -0.8; // Heavy penalty for 50%+ advantage
+          if (allianceRatio >= 1.3) return -0.6; // Moderate penalty for 30%+ advantage
+          if (allianceRatio <= 0.5) return 1.0; // Maximum bonus for 50%+ disadvantage
+          if (allianceRatio <= 0.7) return 0.8; // High bonus for 30%+ disadvantage
+          if (allianceRatio <= 0.9) return 0.4; // Moderate bonus for 10%+ disadvantage
+          return 0; // Fair fight
+        }
+      }
+    }
+    
+    // Fallback to individual guild calculation
     const avgPlayers =
       battleAnalysis.totalPlayers / battleAnalysis.guildStats.length;
     const playerRatio = guildStat.players / avgPlayers;
 
-    // Consider advantage/disadvantage
-    if (playerRatio > 1.5) return -0.5; // Had advantage
-    if (playerRatio < 0.7) return 0.5; // Had disadvantage
-    return 0; // Fair fight
+    // More aggressive penalties for player count advantages
+    if (playerRatio >= 2.0) {
+      return -1.0; // Severe penalty for having 2x+ more players
+    }
+    if (playerRatio >= 1.5) {
+      return -0.8; // Heavy penalty for having 50%+ more players
+    }
+    if (playerRatio >= 1.3) {
+      return -0.6; // Moderate penalty for having 30%+ more players
+    }
+    if (playerRatio <= 0.5) {
+      return 1.0; // Maximum bonus for having 50% or fewer players
+    }
+    if (playerRatio <= 0.7) {
+      return 0.8; // High bonus for having 30% or fewer players
+    }
+    if (playerRatio <= 0.9) {
+      return 0.4; // Moderate bonus for having 10% or fewer players
+    }
+    return 0; // Fair fight (0.9 to 1.3 ratio)
   }
 
   /**
@@ -315,29 +398,173 @@ export class MmrService {
   }
 
   /**
-   * Adjust MMR changes based on opponent strength
+   * Calculate opponent strength factor (-1 to 1)
+   * This factor heavily penalizes easy wins and rewards difficult wins
    */
-  private adjustForOpponentStrength(
-    mmrChanges: Map<string, number>,
+  private calculateOpponentStrengthFactor(
+    guildStat: GuildBattleStats,
     battleAnalysis: BattleAnalysis
-  ): void {
-    const avgOpponentMmr =
-      battleAnalysis.guildStats.reduce((sum, g) => sum + g.currentMmr, 0) /
-      battleAnalysis.guildStats.length;
+  ): number {
+    // Get all opponent MMRs
+    const opponentMmrs = battleAnalysis.guildStats
+      .filter((g) => g.guildId !== guildStat.guildId)
+      .map((g) => g.currentMmr);
 
-    for (const [guildId, currentChange] of mmrChanges) {
-      const guildStat = battleAnalysis.guildStats.find(
-        (g) => g.guildId === guildId
-      );
-      if (!guildStat) continue;
+    if (opponentMmrs.length === 0) return 0;
 
-      // If opponents have higher MMR, increase the change
-      const opponentStrengthFactor =
-        avgOpponentMmr > guildStat.currentMmr ? 1.2 : 0.8;
-      const adjustedChange = currentChange * opponentStrengthFactor;
+    // Calculate average opponent MMR
+    const avgOpponentMmr = opponentMmrs.reduce((sum, mmr) => sum + mmr, 0) / opponentMmrs.length;
+    
+    // Calculate MMR difference
+    const mmrDifference = guildStat.currentMmr - avgOpponentMmr;
+    
+    // Normalize the difference (100 MMR difference = 0.5 factor)
+    const normalizedDifference = mmrDifference / MMR_CONSTANTS.OPPONENT_MMR_DIFFERENCE_THRESHOLD;
+    
+    // Apply sigmoid-like function to smooth the factor
+    // Positive difference (guild has higher MMR) = negative factor (penalty for easy win)
+    // Negative difference (guild has lower MMR) = positive factor (bonus for difficult win)
+    const factor = -Math.tanh(normalizedDifference);
+    
+    return Math.max(-1, Math.min(1, factor));
+  }
 
-      mmrChanges.set(guildId, adjustedChange);
+  /**
+   * Calculate individual performance factor (-1 to 1)
+   * This factor rewards guilds that contribute significantly to their alliance's success
+   * and penalizes guilds that contribute little despite being in a winning alliance
+   */
+  private calculateIndividualPerformanceFactor(
+    guildStat: GuildBattleStats,
+    battleAnalysis: BattleAnalysis
+  ): number {
+    // If no alliance data available, use individual guild performance
+    if (!battleAnalysis.guildAlliances) {
+      return this.calculateIndividualGuildPerformance(guildStat, battleAnalysis);
     }
+
+    // Find guild's alliance
+    const guildAlliance = battleAnalysis.guildAlliances.get(guildStat.guildName);
+    if (!guildAlliance) {
+      return this.calculateIndividualGuildPerformance(guildStat, battleAnalysis);
+    }
+
+    // Get all guilds in the same alliance
+    const allianceGuilds = battleAnalysis.guildStats.filter(g => 
+      battleAnalysis.guildAlliances?.get(g.guildName) === guildAlliance
+    );
+
+    if (allianceGuilds.length <= 1) {
+      return 0; // Single guild alliance, no comparison needed
+    }
+
+    // Calculate alliance totals
+    const allianceTotalKills = allianceGuilds.reduce((sum, g) => sum + g.kills, 0);
+    const allianceTotalDeaths = allianceGuilds.reduce((sum, g) => sum + g.deaths, 0);
+    const allianceTotalFameGained = allianceGuilds.reduce((sum, g) => sum + g.fameGained, 0);
+    const allianceTotalFameLost = allianceGuilds.reduce((sum, g) => sum + g.fameLost, 0);
+    const allianceTotalPlayers = allianceGuilds.reduce((sum, g) => sum + g.players, 0);
+
+    // Calculate guild's contribution ratios
+    const killContribution = allianceTotalKills > 0 ? guildStat.kills / allianceTotalKills : 0;
+    const deathContribution = allianceTotalDeaths > 0 ? guildStat.deaths / allianceTotalDeaths : 0;
+    const fameGainedContribution = allianceTotalFameGained > 0 ? guildStat.fameGained / allianceTotalFameGained : 0;
+    const fameLostContribution = allianceTotalFameLost > 0 ? guildStat.fameLost / allianceTotalFameLost : 0;
+    const playerContribution = allianceTotalPlayers > 0 ? guildStat.players / allianceTotalPlayers : 0;
+
+    // Calculate performance score (positive for good performance, negative for poor)
+    let performanceScore = 0;
+
+    // Kill contribution (positive impact) - More aggressive weighting
+    if (playerContribution > 0) {
+      const expectedKillRatio = playerContribution;
+      const actualKillRatio = killContribution;
+      const killPerformance = (actualKillRatio - expectedKillRatio) * 3; // Increased weight
+      performanceScore += killPerformance;
+      
+      // Extra penalty for very low kill contribution (less than 50% of expected)
+      if (actualKillRatio < expectedKillRatio * 0.5) {
+        performanceScore -= 0.5; // Additional penalty for poor performance
+      }
+    }
+
+    // Death contribution (negative impact, but expected based on player count)
+    if (playerContribution > 0) {
+      const expectedDeathRatio = playerContribution;
+      const actualDeathRatio = deathContribution;
+      const deathPerformance = (actualDeathRatio - expectedDeathRatio) * 2; // Increased weight
+      performanceScore -= deathPerformance;
+      
+      // Extra penalty for very high death contribution (more than 150% of expected)
+      if (actualDeathRatio > expectedDeathRatio * 1.5) {
+        performanceScore -= 0.3; // Additional penalty for poor performance
+      }
+    }
+
+    // Fame efficiency (positive impact)
+    if (playerContribution > 0) {
+      const expectedFameRatio = playerContribution;
+      const actualFameRatio = fameGainedContribution;
+      const famePerformance = (actualFameRatio - expectedFameRatio) * 1.5; // Increased weight
+      performanceScore += famePerformance;
+    }
+
+    // Fame loss efficiency (negative impact)
+    if (playerContribution > 0) {
+      const expectedFameLossRatio = playerContribution;
+      const actualFameLossRatio = fameLostContribution;
+      const fameLossPerformance = (actualFameLossRatio - expectedFameLossRatio) * 1.5; // Increased weight
+      performanceScore -= fameLossPerformance;
+    }
+
+    // Normalize to -1 to 1 range
+    return Math.max(-1, Math.min(1, performanceScore));
+  }
+
+  /**
+   * Calculate individual guild performance when no alliance data is available
+   */
+  private calculateIndividualGuildPerformance(
+    guildStat: GuildBattleStats,
+    battleAnalysis: BattleAnalysis
+  ): number {
+    // Calculate guild's performance relative to battle averages
+    const avgKills = battleAnalysis.guildStats.reduce((sum, g) => sum + g.kills, 0) / battleAnalysis.guildStats.length;
+    const avgDeaths = battleAnalysis.guildStats.reduce((sum, g) => sum + g.deaths, 0) / battleAnalysis.guildStats.length;
+    const avgFameGained = battleAnalysis.guildStats.reduce((sum, g) => sum + g.fameGained, 0) / battleAnalysis.guildStats.length;
+    const avgFameLost = battleAnalysis.guildStats.reduce((sum, g) => sum + g.fameLost, 0) / battleAnalysis.guildStats.length;
+    const avgPlayers = battleAnalysis.guildStats.reduce((sum, g) => sum + g.players, 0) / battleAnalysis.guildStats.length;
+
+    // Calculate performance ratios
+    const killRatio = avgKills > 0 ? guildStat.kills / avgKills : 0;
+    const deathRatio = avgDeaths > 0 ? guildStat.deaths / avgDeaths : 0;
+    const fameGainedRatio = avgFameGained > 0 ? guildStat.fameGained / avgFameGained : 0;
+    const fameLostRatio = avgFameLost > 0 ? guildStat.fameLost / avgFameLost : 0;
+    const playerRatio = avgPlayers > 0 ? guildStat.players / avgPlayers : 0;
+
+    // Calculate performance score
+    let performanceScore = 0;
+
+    // Normalize by player count
+    if (playerRatio > 0) {
+      performanceScore += (killRatio - playerRatio) * 2; // Kills relative to player count
+      performanceScore -= (deathRatio - playerRatio) * 1.5; // Deaths relative to player count
+      performanceScore += (fameGainedRatio - playerRatio) * 1.0; // Fame gained relative to player count
+      performanceScore -= (fameLostRatio - playerRatio) * 1.0; // Fame lost relative to player count
+    }
+
+    // Normalize to -1 to 1 range
+    return Math.max(-1, Math.min(1, performanceScore));
+  }
+
+  /**
+   * Adjust MMR changes based on opponent strength
+   * @deprecated This method is now deprecated in favor of calculateOpponentStrengthFactor
+   * which is integrated into the main calculation
+   */
+  private adjustForOpponentStrength(): void {
+    // This method is now deprecated in favor of calculateOpponentStrengthFactor
+    // which is integrated into the main calculation
   }
 
   /**
@@ -808,6 +1035,10 @@ export class MmrService {
       const kdFactor = this.calculateKdFactor(battleStats);
       const durationFactor = this.calculateDurationFactor(battleAnalysis);
       const clusteringFactor = this.calculateClusteringFactor(battleStats);
+      const opponentStrengthFactor = this.calculateOpponentStrengthFactor(
+        battleStats,
+        battleAnalysis
+      );
 
       // Calculate weighted contributions
       const winLossContribution = winLossFactor * MMR_CONSTANTS.WIN_LOSS_WEIGHT;
@@ -822,6 +1053,8 @@ export class MmrService {
         durationFactor * MMR_CONSTANTS.BATTLE_DURATION_WEIGHT;
       const clusteringContribution =
         clusteringFactor * MMR_CONSTANTS.KILL_CLUSTERING_WEIGHT;
+      const opponentStrengthContribution =
+        opponentStrengthFactor * MMR_CONSTANTS.OPPONENT_MMR_WEIGHT;
 
       // Calculate total weighted score
       const totalWeightedScore =
@@ -832,7 +1065,8 @@ export class MmrService {
         battleSizeContribution +
         kdContribution +
         durationContribution +
-        clusteringContribution;
+        clusteringContribution +
+        opponentStrengthContribution;
 
       // Get opponent information
       const opponentGuilds = battleAnalysis.guildStats
@@ -889,7 +1123,7 @@ export class MmrService {
           kdFactor,
           durationFactor,
           clusteringFactor,
-          opponentStrengthFactor: 1.0, // Default, will be calculated if needed
+          opponentStrengthFactor,
 
           // Weighted contributions
           winLossContribution,
@@ -900,7 +1134,7 @@ export class MmrService {
           kdContribution,
           durationContribution,
           clusteringContribution,
-          opponentStrengthContribution: 0.0, // Will be calculated if needed
+          opponentStrengthContribution,
 
           // Final calculation
           totalWeightedScore,
