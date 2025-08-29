@@ -63,6 +63,9 @@ async function main() {
       case 'guild-prime-time-mass':
         await getGuildPrimeTimeMass(args);
         break;
+      case 'test-anti-farming':
+        await testAntiFarming(args);
+        break;
       default:
         showHelp();
     }
@@ -306,6 +309,85 @@ async function getGuildPrimeTimeMass(args: string[]) {
   }
 }
 
+async function testAntiFarming(args: string[]) {
+  if (args.length < 2) {
+    console.log('Usage: test-anti-farming <guildName> <opponentGuildName>');
+    console.log('Example: test-anti-farming "Guild A" "Guild B"');
+    return;
+  }
+
+  const [guildName, opponentGuildName] = args;
+  
+  console.log(`🔍 Testing anti-farming system for ${guildName} vs ${opponentGuildName}`);
+  
+  // Get current active season
+  const season = await seasonService.getActiveSeason();
+  if (!season) {
+    console.log('❌ No active season found');
+    return;
+  }
+  
+  // Get guild
+  const guild = await guildService.getGuildByName(guildName);
+  if (!guild) {
+    console.log(`❌ Guild not found: ${guildName}`);
+    return;
+  }
+  
+  console.log(`📊 Testing anti-farming factor for guild ${guildName} (ID: ${guild.id}) in season ${season.name}`);
+  
+  // Test the anti-farming calculation
+  const antiFarmingFactor = await mmrService['calculateAntiFarmingFactor'](
+    guild.id,
+    season.id,
+    [opponentGuildName],
+    true // isWin = true
+  );
+  
+  console.log(`🎯 Anti-farming factor: ${antiFarmingFactor.toFixed(3)}`);
+  
+  if (antiFarmingFactor < 1.0) {
+    console.log(`⚠️  Anti-farming is active! MMR gains will be reduced by ${((1 - antiFarmingFactor) * 100).toFixed(1)}%`);
+  } else {
+    console.log(`✅ No anti-farming reduction applied`);
+  }
+  
+  // Show recent wins against this opponent
+  const lookbackDate = new Date();
+  lookbackDate.setDate(lookbackDate.getDate() - 30);
+  
+  const recentWins = await prisma.mmrCalculationLog.findMany({
+    where: {
+      guildId: guild.id,
+      seasonId: season.id,
+      isWin: true,
+      processedAt: {
+        gte: lookbackDate
+      },
+      opponentGuilds: {
+        has: opponentGuildName
+      }
+    },
+    select: {
+      battleId: true,
+      processedAt: true,
+      opponentGuilds: true
+    },
+    orderBy: {
+      processedAt: 'desc'
+    }
+  });
+  
+  console.log(`📈 Recent wins against ${opponentGuildName} in the last 30 days: ${recentWins.length}`);
+  
+  if (recentWins.length > 0) {
+    console.log('📋 Recent battles:');
+    recentWins.slice(0, 5).forEach((win, index) => {
+      console.log(`  ${index + 1}. Battle ${win.battleId} - ${win.processedAt.toISOString()}`);
+    });
+  }
+}
+
 function showHelp() {
   console.log(`
 🏆 Albion MMR Management Tool
@@ -325,6 +407,7 @@ Commands:
   top-guilds [limit] [seasonId]                  Get top guilds by MMR
   guild-mmr <guildName> [seasonId]               Get guild MMR
   guild-prime-time-mass <guildId> <seasonId>    Get prime time mass data for a guild
+  test-anti-farming <guildName> <opponentGuildName> Test anti-farming system
 
 Examples:
   yarn tsx apps/manage-mmr.ts create-season "Season 1" "2024-01-01"

@@ -253,14 +253,19 @@ async function processMmrCalculationJob(job: Job<MmrCalculationJobData>): Promis
     // Calculate MMR changes
     console.log(`🏆 [MMR-QUEUE] Calculating MMR changes for battle ${battleId}`);
     const mmrChanges = await mmrService.calculateMmrForBattle(battleAnalysis);
-    console.log(`📊 [MMR-QUEUE] MMR changes calculated for battle ${battleId}:`, Object.fromEntries(mmrChanges));
+    console.log(`📊 [MMR-QUEUE] MMR changes calculated for battle ${battleId}:`, Object.fromEntries(
+      Array.from(mmrChanges.entries()).map(([guildId, result]) => [guildId, result.mmrChange])
+    ));
 
     // Update MMR for each guild
     console.log(`🏆 [MMR-QUEUE] Updating MMR for guilds in battle ${battleId}`);
     await Promise.all(
       guildStatsWithMmr.map(async (guildStat) => {
-        const mmrChange = mmrChanges.get(guildStat.guildId) ?? 0;
-        console.log(`📊 [MMR-QUEUE] Updating guild ${guildStat.guildName}: MMR change = ${mmrChange}`);
+        const mmrResult = mmrChanges.get(guildStat.guildId);
+        const mmrChange = mmrResult?.mmrChange ?? 0;
+        const antiFarmingFactor = mmrResult?.antiFarmingFactor;
+        
+        console.log(`📊 [MMR-QUEUE] Updating guild ${guildStat.guildName}: MMR change = ${mmrChange}, anti-farming factor = ${antiFarmingFactor}`);
         
         // Update guild season MMR
         await mmrService.updateGuildSeasonMmr(
@@ -268,7 +273,8 @@ async function processMmrCalculationJob(job: Job<MmrCalculationJobData>): Promis
           seasonId,
           mmrChange,
           guildStat,
-          battleAnalysis
+          battleAnalysis,
+          antiFarmingFactor
         );
       })
     );
@@ -282,7 +288,9 @@ async function processMmrCalculationJob(job: Job<MmrCalculationJobData>): Promis
     logger.info('Successfully processed MMR calculation job', {
       jobId: job.id,
       battleId: battleId.toString(),
-      mmrChanges: Object.fromEntries(mmrChanges)
+      mmrChanges: Object.fromEntries(
+        Array.from(mmrChanges.entries()).map(([guildId, result]) => [guildId, result.mmrChange])
+      )
     });
 
   } catch (error) {

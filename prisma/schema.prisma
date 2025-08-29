@@ -326,6 +326,10 @@ model MmrCalculationLog {
   opponentGuilds        String[] // Array of opponent guild names
   opponentMmrs          Float[]  // Array of opponent MMRs
   
+  // Anti-farming tracking
+  antiFarmingFactor     Float?   // Anti-farming factor applied (null if not applied)
+  originalMmrChange     Float?   // MMR change before anti-farming was applied
+  
   // Metadata
   calculationVersion    String   @default("1.0") // For algorithm versioning
   processedAt           DateTime @default(now())
@@ -344,6 +348,7 @@ model MmrCalculationLog {
   @@index([mmrChange])
   @@index([isWin])
   @@index([isPrimeTime])
+  @@index([antiFarmingFactor])
   @@map("mmr_calculation_logs")
 }
 

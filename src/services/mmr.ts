@@ -34,6 +34,9 @@ const MMR_CONSTANTS = {
   OPPONENT_MMR_DIFFERENCE_THRESHOLD: 100, // 100 MMR difference for significant impact
   MAX_MMR_GAIN_FOR_EASY_WIN: 25, // Maximum points for easy wins (increased to allow difficult wins)
   MIN_MMR_LOSS_FOR_LOSS: 8, // Minimum points lost for losses
+  ANTI_FARMING_SEASON_LOOKBACK_DAYS: 30, // Look back 30 days for anti-farming
+  ANTI_FARMING_WIN_THRESHOLD: 3, // Wins against an opponent before reduction
+  ANTI_FARMING_MAX_WINS: 10, // Maximum wins against an opponent before full reduction
 } as const;
 
 export interface GuildBattleStats {
@@ -77,30 +80,32 @@ export class MmrService {
    */
   async calculateMmrForBattle(
     battleAnalysis: BattleAnalysis
-  ): Promise<Map<string, number>> {
+  ): Promise<Map<string, { mmrChange: number; antiFarmingFactor?: number }>> {
     try {
       logger.info("Starting MMR calculation for battle", {
         battleId: battleAnalysis.battleId.toString(),
         guildCount: battleAnalysis.guildStats.length,
       });
 
-      const mmrChanges = new Map<string, number>();
+      const mmrResults = new Map<string, { mmrChange: number; antiFarmingFactor?: number }>();
 
       // Calculate base MMR changes for each guild
       for (const guildStat of battleAnalysis.guildStats) {
-        const mmrChange = await this.calculateGuildMmrChange(
+        const result = await this.calculateGuildMmrChangeWithAntiFarming(
           guildStat,
           battleAnalysis
         );
-        mmrChanges.set(guildStat.guildId, mmrChange);
+        mmrResults.set(guildStat.guildId, result);
       }
 
       logger.info("Completed MMR calculation for battle", {
         battleId: battleAnalysis.battleId.toString(),
-        mmrChanges: Object.fromEntries(mmrChanges),
+        mmrChanges: Object.fromEntries(
+          Array.from(mmrResults.entries()).map(([guildId, result]) => [guildId, result.mmrChange])
+        ),
       });
 
-      return mmrChanges;
+      return mmrResults;
     } catch (error) {
       logger.error("Error calculating MMR for battle", {
         battleId: battleAnalysis.battleId.toString(),
@@ -111,12 +116,12 @@ export class MmrService {
   }
 
   /**
-   * Calculate MMR change for a single guild in a battle
+   * Calculate MMR change for a single guild in a battle with anti-farming factor
    */
-  private async calculateGuildMmrChange(
+  private async calculateGuildMmrChangeWithAntiFarming(
     guildStat: GuildBattleStats,
     battleAnalysis: BattleAnalysis
-  ): Promise<number> {
+  ): Promise<{ mmrChange: number; antiFarmingFactor?: number }> {
     try {
       let totalMmrChange = 0;
 
@@ -192,9 +197,42 @@ export class MmrService {
         finalMmrChange = Math.min(finalMmrChange, -MMR_CONSTANTS.MIN_MMR_LOSS_FOR_LOSS);
       }
 
+      // Apply anti-farming factor to reduce MMR gains for repeated wins against same opponents
+      let antiFarmingFactor: number | undefined;
+      if (isWin && finalMmrChange > 0) {
+        // Get opponent guilds from battle analysis
+        const opponentGuilds = battleAnalysis.guildStats
+          .filter(g => g.guildId !== guildStat.guildId)
+          .map(g => g.guildName);
+
+        // Get current season ID
+        const currentSeason = await this.getCurrentActiveSeason();
+        if (currentSeason) {
+          antiFarmingFactor = await this.calculateAntiFarmingFactor(
+            guildStat.guildId,
+            currentSeason.id,
+            opponentGuilds,
+            isWin
+          );
+
+          // Apply anti-farming reduction
+          const originalMmrChange = finalMmrChange;
+          finalMmrChange *= antiFarmingFactor;
+
+          logger.debug("Applied anti-farming factor", {
+            guildName: guildStat.guildName,
+            opponentGuilds,
+            antiFarmingFactor,
+            originalMmrChange,
+            finalMmrChange
+          });
+        }
+      }
+
       logger.debug("Calculated MMR change for guild", {
         guildName: guildStat.guildName,
         totalMmrChange: finalMmrChange,
+        antiFarmingFactor,
         factors: {
           winLoss: winLossFactor,
           fame: fameFactor,
@@ -209,15 +247,20 @@ export class MmrService {
         },
       });
 
-      return finalMmrChange;
+      return { 
+        mmrChange: finalMmrChange, 
+        ...(antiFarmingFactor !== undefined && { antiFarmingFactor }) 
+      };
     } catch (error) {
       logger.error("Error calculating MMR change for guild", {
         guildName: guildStat.guildName,
         error: error instanceof Error ? error.message : "Unknown error",
       });
-      return 0; // Return 0 change on error
+      return { mmrChange: 0 }; // Return 0 change on error
     }
   }
+
+
 
   /**
    * Calculate win/loss factor (-1 to 1)
@@ -557,15 +600,7 @@ export class MmrService {
     return Math.max(-1, Math.min(1, performanceScore));
   }
 
-  /**
-   * Adjust MMR changes based on opponent strength
-   * @deprecated This method is now deprecated in favor of calculateOpponentStrengthFactor
-   * which is integrated into the main calculation
-   */
-  private adjustForOpponentStrength(): void {
-    // This method is now deprecated in favor of calculateOpponentStrengthFactor
-    // which is integrated into the main calculation
-  }
+
 
   /**
    * Check if battle meets MMR calculation criteria
@@ -585,7 +620,8 @@ export class MmrService {
     seasonId: string,
     mmrChange: number,
     battleStats: GuildBattleStats,
-    battleAnalysis: BattleAnalysis
+    battleAnalysis: BattleAnalysis,
+    antiFarmingFactor?: number
   ): Promise<void> {
     try {
       // Get or create guild season record
@@ -644,7 +680,8 @@ export class MmrService {
         newMmr,
         battleStats,
         battleAnalysis,
-        isWin
+        isWin,
+        antiFarmingFactor
       );
 
       // Update prime time mass if this is a prime time battle
@@ -664,6 +701,7 @@ export class MmrService {
         mmrChange,
         isWin,
         isPrimeTime: battleStats.isPrimeTime,
+        antiFarmingFactor,
       });
     } catch (error) {
       logger.error("Error updating guild season MMR", {
@@ -1017,7 +1055,8 @@ export class MmrService {
     newMmr: number,
     battleStats: GuildBattleStats,
     battleAnalysis: BattleAnalysis,
-    isWin: boolean
+    isWin: boolean,
+    antiFarmingFactor?: number
   ): Promise<void> {
     try {
       // Calculate all the individual factors for detailed logging
@@ -1147,6 +1186,10 @@ export class MmrService {
           opponentGuilds,
           opponentMmrs,
 
+          // Anti-farming tracking
+          antiFarmingFactor: antiFarmingFactor ?? null,
+          originalMmrChange: antiFarmingFactor !== undefined && antiFarmingFactor < 1.0 ? mmrChange / antiFarmingFactor : null,
+
           // Metadata
           calculationVersion: "1.0",
         },
@@ -1186,6 +1229,26 @@ export class MmrService {
 
     // Ensure carryover MMR is at least the base MMR
     return Math.max(baseMmr, carryoverMmr);
+  }
+
+  /**
+   * Get the currently active season
+   */
+  async getCurrentActiveSeason(): Promise<{ id: string; name: string } | null> {
+    try {
+      const activeSeason = await this.prisma.season.findFirst({
+        where: { isActive: true },
+        select: { id: true, name: true },
+        orderBy: { startDate: 'desc' }
+      });
+
+      return activeSeason;
+    } catch (error) {
+      logger.error("Error getting current active season", {
+        error: error instanceof Error ? error.message : "Unknown error",
+      });
+      return null;
+    }
   }
 
   /**
@@ -1414,5 +1477,102 @@ export class MmrService {
     // Fallback: try to extract from kills data if available
     // This would require passing kills data to the battle analysis
     return null;
+  }
+
+  /**
+   * Calculate anti-farming factor to prevent guilds from farming weaker opponents
+   * This reduces MMR gains when a guild has repeatedly won against the same opponent
+   */
+  private async calculateAntiFarmingFactor(
+    guildId: string,
+    seasonId: string,
+    opponentGuilds: string[],
+    isWin: boolean
+  ): Promise<number> {
+    try {
+      // Only apply anti-farming to wins (we don't want to reduce losses)
+      if (!isWin || opponentGuilds.length === 0) {
+        return 1.0; // No reduction
+      }
+
+      // Look back 30 days for recent wins against these opponents
+      const lookbackDate = new Date();
+      lookbackDate.setDate(lookbackDate.getDate() - MMR_CONSTANTS.ANTI_FARMING_SEASON_LOOKBACK_DAYS);
+
+      // Get recent wins against each opponent
+      const recentWins = await this.prisma.mmrCalculationLog.findMany({
+        where: {
+          guildId,
+          seasonId,
+          isWin: true,
+          processedAt: {
+            gte: lookbackDate
+          },
+          opponentGuilds: {
+            hasSome: opponentGuilds
+          }
+        },
+        select: {
+          opponentGuilds: true,
+          processedAt: true
+        },
+        orderBy: {
+          processedAt: 'desc'
+        }
+      });
+
+      if (recentWins.length === 0) {
+        return 1.0; // No recent wins, no reduction
+      }
+
+      // Count wins against each opponent
+      const opponentWinCounts = new Map<string, number>();
+      
+      for (const win of recentWins) {
+        for (const opponent of win.opponentGuilds) {
+          if (opponentGuilds.includes(opponent)) {
+            opponentWinCounts.set(opponent, (opponentWinCounts.get(opponent) || 0) + 1);
+          }
+        }
+      }
+
+      // Calculate the maximum win count against any opponent in this battle
+      let maxWinsAgainstOpponent = 0;
+      for (const opponent of opponentGuilds) {
+        const winCount = opponentWinCounts.get(opponent) || 0;
+        maxWinsAgainstOpponent = Math.max(maxWinsAgainstOpponent, winCount);
+      }
+
+      // Apply anti-farming reduction
+      if (maxWinsAgainstOpponent <= MMR_CONSTANTS.ANTI_FARMING_WIN_THRESHOLD) {
+        return 1.0; // No reduction for wins under threshold
+      }
+
+      // Calculate reduction factor
+      const winsOverThreshold = maxWinsAgainstOpponent - MMR_CONSTANTS.ANTI_FARMING_WIN_THRESHOLD;
+      const maxWinsOverThreshold = MMR_CONSTANTS.ANTI_FARMING_MAX_WINS - MMR_CONSTANTS.ANTI_FARMING_WIN_THRESHOLD;
+      
+      // Linear reduction from 1.0 to 0.0 over the remaining wins
+      const reductionFactor = Math.max(0.0, 1.0 - (winsOverThreshold / maxWinsOverThreshold));
+
+      logger.debug('Anti-farming factor calculated', {
+        guildId,
+        opponentGuilds,
+        maxWinsAgainstOpponent,
+        winsOverThreshold,
+        reductionFactor,
+        recentWinsCount: recentWins.length
+      });
+
+      return reductionFactor;
+
+    } catch (error) {
+      logger.error('Error calculating anti-farming factor', {
+        guildId,
+        opponentGuilds,
+        error: error instanceof Error ? error.message : 'Unknown error'
+      });
+      return 1.0; // Return no reduction on error
+    }
   }
 }
