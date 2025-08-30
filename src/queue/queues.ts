@@ -111,12 +111,17 @@ export async function cleanupOldJobs() {
   const thirtyMinutes = 30 * 60 * 1000;
   
   try {
+    // Standard BullMQ cleanup
     await Promise.all([
       battleCrawlQueue.clean(thirtyMinutes, 'completed' as any),
       battleCrawlQueue.clean(thirtyMinutes, 'failed' as any),
       killsFetchQueue.clean(thirtyMinutes, 'completed' as any),
       killsFetchQueue.clean(thirtyMinutes, 'failed' as any),
     ]);
+    
+    // NEW: Also clean up individual job keys
+    await cleanupIndividualJobKeys(thirtyMinutes);
+    
     console.log('✅ Old jobs cleaned up');
   } catch (error) {
     console.error('❌ Error during cleanup:', error);
@@ -130,12 +135,17 @@ export async function aggressiveCleanup() {
   const tenMinutes = 10 * 60 * 1000;
   
   try {
+    // Standard BullMQ cleanup
     await Promise.all([
       battleCrawlQueue.clean(tenMinutes, 'completed' as any),
       battleCrawlQueue.clean(tenMinutes, 'failed' as any),
       killsFetchQueue.clean(tenMinutes, 'completed' as any),
       killsFetchQueue.clean(tenMinutes, 'failed' as any),
     ]);
+    
+    // NEW: Also clean up individual job keys
+    await cleanupIndividualJobKeys(tenMinutes);
+    
     console.log('✅ Aggressive cleanup completed');
   } catch (error) {
     console.error('❌ Error during aggressive cleanup:', error);
@@ -149,6 +159,7 @@ export async function comprehensiveCleanup() {
     // Clean up jobs older than 1 minute (very aggressive)
     const oneMinute = 1 * 60 * 1000;
     
+    // Standard BullMQ cleanup
     await Promise.all([
       battleCrawlQueue.clean(oneMinute, 'completed' as any),
       battleCrawlQueue.clean(oneMinute, 'failed' as any),
@@ -164,9 +175,64 @@ export async function comprehensiveCleanup() {
       killsFetchQueue.clean(0, 'failed' as any),
     ]);
     
+    // NEW: Also clean up individual job keys
+    await cleanupIndividualJobKeys(oneMinute);
+    
     console.log('✅ Comprehensive cleanup completed');
   } catch (error) {
     console.error('❌ Error during comprehensive cleanup:', error);
+  }
+}
+
+/**
+ * NEW: Clean up individual job keys that are older than specified age
+ */
+async function cleanupIndividualJobKeys(maxAgeMs: number) {
+  try {
+    console.log(`🧹 Cleaning up individual job keys older than ${maxAgeMs / 1000 / 60} minutes...`);
+    
+    // Get all BullMQ keys
+    const keys = await redis.keys('bull:*');
+    const jobKeys = keys.filter(key => {
+      // Match individual job keys like bull:kills-fetch:battle-1234567890
+      const parts = key.split(':');
+      return parts.length >= 3 && 
+             (parts[1] === 'kills-fetch' || parts[1] === 'battle-crawl') &&
+             !key.includes('completed') && 
+             !key.includes('failed') && 
+             !key.includes('active') && 
+             !key.includes('waiting') && 
+             !key.includes('delayed') && 
+             !key.includes('events') && 
+             !key.includes('meta');
+    });
+    
+    console.log(`Found ${jobKeys.length} individual job keys to check`);
+    
+    let removedKeys = 0;
+    const cutoffTime = Date.now() - maxAgeMs;
+    
+    for (const key of jobKeys) {
+      try {
+        // Get job data to check timestamp
+        const jobData = await redis.hgetall(key);
+        if (jobData.timestamp) {
+          const jobTimestamp = parseInt(jobData.timestamp);
+          if (jobTimestamp < cutoffTime) {
+            await redis.del(key);
+            removedKeys++;
+          }
+        }
+      } catch (error) {
+        // Skip keys that can't be processed
+        console.log(`Skipping problematic key: ${key}`);
+      }
+    }
+    
+    console.log(`✅ Removed ${removedKeys} old individual job keys`);
+    
+  } catch (error) {
+    console.error('❌ Error during individual job key cleanup:', error);
   }
 }
 
@@ -246,31 +312,8 @@ export async function comprehensiveCleanupWithOrphanRemoval() {
       }
     }
     
-    // Also remove any keys that are too old (older than 1 hour)
-    const oneHourAgo = Date.now() - (60 * 60 * 1000);
-    const keysToCheck = keys.filter(key => !key.includes('meta') && !key.includes('events'));
-    
-    for (const key of keysToCheck) {
-      try {
-        const ttl = await redis.ttl(key);
-        if (ttl === -1) { // No expiration set
-          // Check if it's a job key and if so, check its timestamp
-          if (key.includes('completed') || key.includes('failed')) {
-            const jobData = await redis.hgetall(key);
-            if (jobData.timestamp) {
-              const jobTimestamp = parseInt(jobData.timestamp);
-              if (jobTimestamp < oneHourAgo) {
-                await redis.del(key);
-                removedKeys++;
-              }
-            }
-          }
-        }
-      } catch (error) {
-        // Skip keys that can't be processed
-        console.log(`Skipping problematic key: ${key}`);
-      }
-    }
+    // NEW: Use the enhanced individual job key cleanup
+    await cleanupIndividualJobKeys(60 * 60 * 1000); // 1 hour
     
     console.log(`✅ Comprehensive cleanup completed. Removed ${removedKeys} orphaned keys`);
     
