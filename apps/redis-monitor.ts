@@ -1,6 +1,6 @@
 import { log } from '../src/log.js';
 import redis from '../src/queue/connection.js';
-import { cleanupOldJobs, aggressiveCleanup, comprehensiveCleanup, obliterateAllQueues, getQueueStats } from '../src/queue/queues.js';
+import { cleanupOldJobs, aggressiveCleanup, comprehensiveCleanup, obliterateAllQueues, getQueueStats, comprehensiveCleanupWithOrphanRemoval, nuclearCleanup, ultraAggressiveCleanup } from '../src/queue/queues.js';
 
 const logger = log.child({ component: 'redis-monitor' });
 
@@ -290,6 +290,147 @@ async function comprehensiveCleanupRedis() {
   }
 }
 
+async function comprehensiveCleanupWithOrphanRemovalRedis() {
+  try {
+    logger.info('🧹 Starting comprehensive cleanup with orphan removal...');
+
+    // Test Redis connection
+    await redis.ping();
+    logger.info('✅ Redis connection successful');
+
+    // Get statistics before cleanup
+    const statsBefore = await getQueueStats();
+    logger.info({
+      message: 'Queue statistics before comprehensive cleanup with orphan removal',
+      battleCrawl: statsBefore.battleCrawl,
+      killsFetch: statsBefore.killsFetch
+    });
+
+    // Run comprehensive cleanup with orphan removal
+    await comprehensiveCleanupWithOrphanRemoval();
+
+    // Get statistics after cleanup
+    const statsAfter = await getQueueStats();
+    logger.info({
+      message: 'Queue statistics after comprehensive cleanup with orphan removal',
+      battleCrawl: statsAfter.battleCrawl,
+      killsFetch: statsAfter.killsFetch
+    });
+
+    // Get total Redis keys
+    const keys = await redis.keys('*');
+    const bullKeys = keys.filter(key => key.startsWith('bull:'));
+    
+    logger.info({
+      message: 'Comprehensive cleanup with orphan removal completed',
+      totalKeys: keys.length,
+      bullKeys: bullKeys.length
+    });
+
+  } catch (error) {
+    logger.error({
+      message: 'Error during comprehensive cleanup with orphan removal',
+      error: error instanceof Error ? error.message : 'Unknown error'
+    });
+  } finally {
+    await redis.quit();
+  }
+}
+
+async function nuclearCleanupRedis() {
+  try {
+    logger.info('🧹 Starting NUCLEAR cleanup (DESTRUCTIVE OPERATION)...');
+
+    // Test Redis connection
+    await redis.ping();
+    logger.info('✅ Redis connection successful');
+
+    // Get statistics before cleanup
+    const statsBefore = await getQueueStats();
+    logger.info({
+      message: 'Queue statistics before nuclear cleanup',
+      battleCrawl: statsBefore.battleCrawl,
+      killsFetch: statsBefore.killsFetch
+    });
+
+    // Run nuclear cleanup
+    await nuclearCleanup();
+
+    // Get statistics after cleanup
+    const statsAfter = await getQueueStats();
+    logger.info({
+      message: 'Queue statistics after nuclear cleanup',
+      battleCrawl: statsAfter.battleCrawl,
+      killsFetch: statsAfter.killsFetch
+    });
+
+    // Get total Redis keys
+    const keys = await redis.keys('*');
+    const bullKeys = keys.filter(key => key.startsWith('bull:'));
+    
+    logger.info({
+      message: 'Nuclear cleanup completed',
+      totalKeys: keys.length,
+      bullKeys: bullKeys.length
+    });
+
+  } catch (error) {
+    logger.error({
+      message: 'Error during nuclear cleanup',
+      error: error instanceof Error ? error.message : 'Unknown error'
+    });
+  } finally {
+    await redis.quit();
+  }
+}
+
+async function ultraAggressiveCleanupRedis() {
+  try {
+    logger.info('🧹 Starting ULTRA-AGGRESSIVE cleanup (EMERGENCY OPERATION)...');
+
+    // Test Redis connection
+    await redis.ping();
+    logger.info('✅ Redis connection successful');
+
+    // Get statistics before cleanup
+    const statsBefore = await getQueueStats();
+    logger.info({
+      message: 'Queue statistics before ultra-aggressive cleanup',
+      battleCrawl: statsBefore.battleCrawl,
+      killsFetch: statsBefore.killsFetch
+    });
+
+    // Run ultra-aggressive cleanup
+    await ultraAggressiveCleanup();
+
+    // Get statistics after cleanup
+    const statsAfter = await getQueueStats();
+    logger.info({
+      message: 'Queue statistics after ultra-aggressive cleanup',
+      battleCrawl: statsAfter.battleCrawl,
+      killsFetch: statsAfter.killsFetch
+    });
+
+    // Get total Redis keys
+    const keys = await redis.keys('*');
+    const bullKeys = keys.filter(key => key.startsWith('bull:'));
+    
+    logger.info({
+      message: 'Ultra-aggressive cleanup completed',
+      totalKeys: keys.length,
+      bullKeys: bullKeys.length
+    });
+
+  } catch (error) {
+    logger.error({
+      message: 'Error during ultra-aggressive cleanup',
+      error: error instanceof Error ? error.message : 'Unknown error'
+    });
+  } finally {
+    await redis.quit();
+  }
+}
+
 async function obliterateRedis() {
   try {
     logger.info('🧹 Starting Redis obliteration (DESTRUCTIVE OPERATION)...');
@@ -353,15 +494,27 @@ switch (command) {
   case 'comprehensive':
     comprehensiveCleanupRedis();
     break;
+  case 'comprehensive-orphan':
+    comprehensiveCleanupWithOrphanRemovalRedis();
+    break;
+  case 'nuclear':
+    nuclearCleanupRedis();
+    break;
+  case 'ultra':
+    ultraAggressiveCleanupRedis();
+    break;
   case 'obliterate':
     obliterateRedis();
     break;
   default:
     console.log('Usage:');
-    console.log('  yarn tsx apps/redis-monitor.ts monitor        - Monitor Redis health');
-    console.log('  yarn tsx apps/redis-monitor.ts cleanup        - Clean up old jobs (30 min)');
-    console.log('  yarn tsx apps/redis-monitor.ts aggressive     - Aggressive cleanup (10 min)');
-    console.log('  yarn tsx apps/redis-monitor.ts comprehensive  - Comprehensive cleanup (1 min)');
-    console.log('  yarn tsx apps/redis-monitor.ts obliterate     - Obliterate all queues (DESTRUCTIVE)');
+    console.log('  yarn tsx apps/redis-monitor.ts monitor              - Monitor Redis health');
+    console.log('  yarn tsx apps/redis-monitor.ts cleanup              - Clean up old jobs (30 min)');
+    console.log('  yarn tsx apps/redis-monitor.ts aggressive           - Aggressive cleanup (10 min)');
+    console.log('  yarn tsx apps/redis-monitor.ts comprehensive        - Comprehensive cleanup (1 min)');
+    console.log('  yarn tsx apps/redis-monitor.ts comprehensive-orphan - Comprehensive cleanup with orphan removal');
+    console.log('  yarn tsx apps/redis-monitor.ts nuclear              - Nuclear cleanup (removes all except active jobs)');
+    console.log('  yarn tsx apps/redis-monitor.ts ultra                - Ultra-aggressive cleanup (removes ALL BullMQ keys)');
+    console.log('  yarn tsx apps/redis-monitor.ts obliterate           - Obliterate all queues (DESTRUCTIVE)');
     break;
 }

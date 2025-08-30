@@ -2,7 +2,8 @@ import { runBattleCrawl } from '../workers/battleCrawler/producer.js';
 import { config } from '../lib/config.js';
 import { shouldSlowDown, getRateLimitStats } from '../http/client.js';
 import { log } from '../log.js';
-import { cleanupOldJobs, aggressiveCleanup, comprehensiveCleanup, getQueueStats } from '../queue/queues.js';
+import { cleanupOldJobs, aggressiveCleanup, comprehensiveCleanup, comprehensiveCleanupWithOrphanRemoval, getQueueStats } from '../queue/queues.js';
+import redis from '../queue/connection.js';
 
 // Rate limiting state for slowdown tracking
 interface SlowdownState {
@@ -105,6 +106,36 @@ async function performIntelligentCleanup(): Promise<void> {
     
     if (stats.killsFetch.active > 10) {
       log.warn('High number of active jobs detected', { activeJobs: stats.killsFetch.active });
+    }
+    
+    // NEW: Check for orphaned queues every 30 minutes (every 2nd cleanup)
+    const cleanupCount = Math.floor(Date.now() / (config.REDIS_CLEANUP_INTERVAL_MIN * 60 * 1000));
+    if (cleanupCount % 2 === 0) {
+      log.info('Performing orphaned queue check and cleanup');
+      await comprehensiveCleanupWithOrphanRemoval();
+    }
+    
+    // NEW: Monitor Redis key count and trigger emergency cleanup if needed
+    try {
+      const keys = await redis.keys('*');
+      const bullKeys = keys.filter(key => key.startsWith('bull:'));
+      
+      log.info('Redis key monitoring', {
+        totalKeys: keys.length,
+        bullKeys: bullKeys.length
+      });
+      
+      // Emergency cleanup if BullMQ keys exceed 1000
+      if (bullKeys.length > 1000) {
+        log.error('Emergency: High number of BullMQ keys detected - performing comprehensive cleanup', { bullKeys: bullKeys.length });
+        await comprehensiveCleanupWithOrphanRemoval();
+      }
+      // Warning if BullMQ keys exceed 500
+      else if (bullKeys.length > 500) {
+        log.warn('Warning: High number of BullMQ keys detected', { bullKeys: bullKeys.length });
+      }
+    } catch (error) {
+      log.warn('Could not check Redis key count', { error: error instanceof Error ? error.message : 'Unknown error' });
     }
     
   } catch (error) {
