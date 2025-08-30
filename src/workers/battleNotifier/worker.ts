@@ -3,7 +3,7 @@ import { PrismaClient } from '@prisma/client';
 import { log } from '../../log.js';
 import { BattleDetail } from '../../types/albion.js';
 import { TrackingService } from '../../services/tracking.js';
-import { discordService } from '../../services/discord.js';
+import { DiscordWebhookService } from '../../services/discord.js';
 import { getBattleDetail } from '../../http/client.js';
 
 const logger = log.child({ component: 'battle-notifier-worker' });
@@ -137,38 +137,32 @@ export class BattleNotifierWorker {
       }
 
       // Send Discord notification
-      try {
-        await discordService.sendErrorAlert({
-          category: 'api_error' as any,
-          severity: 'low' as any,
-          title: `🏆 Battle Alert: ${subscription.entityName}`,
-          description: `Battle ${battleDetail.albionId} meets your tracking criteria!`,
-          details: {
-            entityName: subscription.entityName,
-            entityType: subscription.entityType,
-            battleId: battleDetail.albionId.toString(),
-            guildStats: guildStats,
-            counterStats: counterStats
-          },
-          timestamp: new Date(),
-          battleId: battleDetail.albionId.toString()
-        });
+      const discordService = new DiscordWebhookService(subscription.discordWebhook);
+      const success = await discordService.sendBattleNotification(
+        battleDetail.albionId,
+        guildStats,
+        counterStats,
+        battleDetail
+      );
 
+      if (success) {
         logger.info({
           message: 'Battle notification sent successfully',
           subscriptionId: subscription.id,
           entityName: subscription.entityName,
           battleId: battleDetail.albionId.toString()
         });
-      } catch (error) {
+      } else {
         logger.error({
           message: 'Failed to send battle notification',
-          error: error instanceof Error ? error.message : String(error),
           subscriptionId: subscription.id,
           entityName: subscription.entityName,
           battleId: battleDetail.albionId.toString()
         });
       }
+
+      // Clean up Discord service
+      discordService.destroy();
 
     } catch (error) {
       logger.error({

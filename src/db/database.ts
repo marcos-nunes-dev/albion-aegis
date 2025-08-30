@@ -1,6 +1,5 @@
 import { PrismaClient } from '@prisma/client';
 import { config } from '../lib/config.js';
-import { discordService } from '../services/discord.js';
 
 // Enhanced database connection manager with connection pooling
 export class DatabaseManager {
@@ -74,12 +73,6 @@ export class DatabaseManager {
       console.error('❌ Prisma error:', e);
       this.connectionErrors++;
       this.isConnected = false;
-      
-      // Track database errors with Discord
-      const error = new Error(`Prisma error: ${e.message || 'Unknown database error'}`);
-      discordService.trackDatabaseError(error, 'database_connection', undefined).catch(err => {
-        console.error('Failed to send Discord alert for database error:', err);
-      });
     });
 
     (this.prisma as any).$on('info', (e: any) => {
@@ -169,13 +162,6 @@ export class DatabaseManager {
         
         if (attempt === maxRetries) {
           console.error(`❌ Database operation failed after ${maxRetries} attempts:`, error);
-          
-          // Track database errors with Discord on final failure
-          const dbError = error instanceof Error ? error : new Error(String(error));
-          discordService.trackDatabaseError(dbError, 'database_operation', undefined).catch(err => {
-            console.error('Failed to send Discord alert for database error:', err);
-          });
-          
           throw error;
         }
 

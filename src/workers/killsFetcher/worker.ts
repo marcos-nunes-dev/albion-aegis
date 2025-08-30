@@ -6,7 +6,6 @@ import { config } from '../../lib/config.js';
 import type { KillEvent } from '../../types/albion.js';
 import redis from '../../queue/connection.js';
 import { MmrIntegrationService } from '../../services/mmrIntegration.js';
-import { discordService } from '../../services/discord.js';
 
 /**
  * Kills fetcher worker - processes jobs from killsFetchQueue
@@ -79,11 +78,6 @@ export function createKillsFetcherWorker(): Worker {
         
       } catch (error) {
         console.error(`❌ [${jobId}] Failed to process kills for battle ${albionId}:`, error);
-        
-        // Track queue error with Discord
-        const queueError = error instanceof Error ? error : new Error(String(error));
-        await discordService.trackQueueError(queueError, 'kills-fetch', jobId || 'unknown', albionId);
-        
         throw error; // Re-throw to trigger job retry
       }
     },
