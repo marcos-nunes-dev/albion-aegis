@@ -17,7 +17,7 @@ const slowdownState: SlowdownState = {
 };
 
 // Slowdown configuration
-const SLOWDOWN_DURATION_MS = 120 * 1000; // 120 seconds
+const SLOWDOWN_DURATION_MS = 60 * 1000; // Reduced from 120 to 60 seconds
 
 /**
  * Check if we should apply slowdown based on rate limiting
@@ -86,13 +86,13 @@ async function performIntelligentCleanup(): Promise<void> {
     });
     
     // Determine cleanup strategy based on queue health
-    if (totalJobs > 1000) {
+    if (totalJobs > 500) { // Reduced from 1000 to 500
       log.warn('High job count detected - performing comprehensive cleanup', { totalJobs });
       await comprehensiveCleanup();
-    } else if (totalJobs > 500) {
+    } else if (totalJobs > 200) { // Reduced from 500 to 200
       log.warn('Moderate job count detected - performing aggressive cleanup', { totalJobs });
       await aggressiveCleanup();
-    } else if (totalJobs > 100) {
+    } else if (totalJobs > 50) { // Reduced from 100 to 50
       log.info('Normal job count - performing regular cleanup', { totalJobs });
       await cleanupOldJobs();
     } else {
@@ -100,11 +100,11 @@ async function performIntelligentCleanup(): Promise<void> {
     }
     
     // Check for specific issues
-    if (stats.killsFetch.failed > 50) {
+    if (stats.killsFetch.failed > 20) { // Reduced from 50 to 20
       log.warn('High number of failed jobs detected', { failedJobs: stats.killsFetch.failed });
     }
     
-    if (stats.killsFetch.active > 10) {
+    if (stats.killsFetch.active > 5) { // Reduced from 10 to 5
       log.warn('High number of active jobs detected', { activeJobs: stats.killsFetch.active });
     }
     
@@ -265,7 +265,7 @@ export function startHighFrequencyCleanupLoop(): ReturnType<typeof setInterval> 
                        Object.values(stats.killsFetch).reduce((a, b) => a + b, 0);
       
       // Only perform cleanup if job count is high
-      if (totalJobs > 200) {
+      if (totalJobs > 100) { // Reduced from 200 to 100
         log.info('High-frequency cleanup triggered', { 
           cleanupNumber: cleanupCount,
           totalJobs,

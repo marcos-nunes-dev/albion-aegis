@@ -70,6 +70,7 @@ yarn manage-mmr top-guilds 100
 - **[MMR Integration Guide](./MMR_INTEGRATION_GUIDE.md)**: Complete MMR system documentation
 - **[Railway Deployment Guide](./RAILWAY_DEPLOYMENT_GUIDE.md)**: Production deployment instructions
 - **[Database Connection Guide](./DATABASE_CONNECTION_GUIDE.md)**: Connection pooling and database optimization
+- **[Performance Optimization Guide](./PERFORMANCE_OPTIMIZATION_GUIDE.md)**: Performance optimizations and tuning
 - **[API Documentation](./docs/api.md)**: API endpoints and usage
 
 ## 🏗️ System Architecture
@@ -223,19 +224,25 @@ yarn build
 # Database
 DATABASE_URL="postgresql://username:password@host:port/database"
 
-# Database Connection Pool Configuration
-DATABASE_POOL_MIN=2
-DATABASE_POOL_MAX=10
+# Database Connection Pool Configuration (Optimized)
+DATABASE_POOL_MIN=3
+DATABASE_POOL_MAX=20
 DATABASE_CONNECTION_TIMEOUT=30000
 DATABASE_IDLE_TIMEOUT=60000
 
 # Redis
 REDIS_URL="redis://username:password@host:port"
 
-# API Configuration
+# API Configuration (Optimized)
 API_BASE_URL="https://gameinfo.albiononline.com/api/gameinfo"
-API_RATE_LIMIT=100
-API_RATE_LIMIT_WINDOW=60000
+RATE_MAX_RPS=8
+CRAWL_INTERVAL_SEC=30
+MAX_PAGES_PER_CRAWL=12
+
+# Queue Management (Optimized)
+REDIS_CLEANUP_INTERVAL_MIN=10
+REDIS_HIGH_FREQ_CLEANUP_INTERVAL_MIN=3
+REDIS_WORKER_CLEANUP_INTERVAL_MIN=8
 
 # Logging
 LOG_LEVEL="info"

@@ -18,11 +18,11 @@ const configSchema = z.object({
   REDIS_URL: z.string().min(1),
   
   // Rate Limiting
-  RATE_MAX_RPS: z.coerce.number().positive().default(4),
+  RATE_MAX_RPS: z.coerce.number().positive().default(8), // Increased from 4 to 8 RPS
   
   // Crawling Configuration
-  CRAWL_INTERVAL_SEC: z.coerce.number().positive().default(45),
-  MAX_PAGES_PER_CRAWL: z.coerce.number().positive().default(8),
+  CRAWL_INTERVAL_SEC: z.coerce.number().positive().default(30), // Reduced from 45 to 30 seconds
+  MAX_PAGES_PER_CRAWL: z.coerce.number().positive().default(12), // Increased from 8 to 12 pages
   SOFT_LOOKBACK_MIN: z.coerce.number().positive().default(180),
   
   // Deep Sweep Configuration
@@ -44,15 +44,15 @@ const configSchema = z.object({
   BATTLE_NOTIFIER_CONCURRENCY: z.coerce.number().positive().default(2),
 
   // Database Pool Configuration
-  DATABASE_POOL_MIN: z.coerce.number().positive().default(1),
-  DATABASE_POOL_MAX: z.coerce.number().positive().default(10),
+  DATABASE_POOL_MIN: z.coerce.number().positive().default(3), // Increased from 1 to 3
+  DATABASE_POOL_MAX: z.coerce.number().positive().default(20), // Increased from 10 to 20
   DATABASE_CONNECTION_TIMEOUT: z.coerce.number().positive().default(30000),
   DATABASE_IDLE_TIMEOUT: z.coerce.number().positive().default(60000),
   
   // Redis Cleanup Configuration
-  REDIS_CLEANUP_INTERVAL_MIN: z.coerce.number().positive().default(15), // Reduced from 30 to 15 minutes
-  REDIS_HIGH_FREQ_CLEANUP_INTERVAL_MIN: z.coerce.number().positive().default(5),
-  REDIS_WORKER_CLEANUP_INTERVAL_MIN: z.coerce.number().positive().default(10),
+  REDIS_CLEANUP_INTERVAL_MIN: z.coerce.number().positive().default(10), // Reduced from 15 to 10 minutes
+  REDIS_HIGH_FREQ_CLEANUP_INTERVAL_MIN: z.coerce.number().positive().default(3), // Reduced from 5 to 3 minutes
+  REDIS_WORKER_CLEANUP_INTERVAL_MIN: z.coerce.number().positive().default(8), // Reduced from 10 to 8 minutes
 });
 
 // Parse and validate the configuration

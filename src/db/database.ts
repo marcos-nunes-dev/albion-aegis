@@ -35,15 +35,17 @@ export class DatabaseManager {
     // Add connection pooling parameters to the URL
     const url = new URL(originalUrl);
     
-    // Add parameters for better pooler compatibility
-    url.searchParams.set('connection_limit', '10');
-    url.searchParams.set('pool_timeout', '30');
-    url.searchParams.set('connect_timeout', '30');
+    // Enhanced parameters for better pooler compatibility and performance
+    url.searchParams.set('connection_limit', config.DATABASE_POOL_MAX.toString());
+    url.searchParams.set('pool_timeout', '60'); // Increased from 30 to 60 seconds
+    url.searchParams.set('connect_timeout', '60'); // Increased from 30 to 60 seconds
+    url.searchParams.set('idle_timeout', config.DATABASE_IDLE_TIMEOUT.toString());
     
     // For Railway and other poolers, add these parameters
     if (url.hostname.includes('railway') || url.hostname.includes('pooler')) {
       url.searchParams.set('pgbouncer', 'true');
       url.searchParams.set('prepared_statements', 'false');
+      url.searchParams.set('pool_mode', 'transaction');
     }
 
     return url.toString();
@@ -130,8 +132,8 @@ export class DatabaseManager {
 
   public async executeWithRetry<T>(
     operation: () => Promise<T>,
-    maxRetries: number = 3,
-    retryDelay: number = 1000
+    maxRetries: number = 5, // Increased from 3 to 5
+    retryDelay: number = 500 // Reduced from 1000 to 500ms for faster recovery
   ): Promise<T> {
     let lastError: Error | null = null;
 
@@ -158,6 +160,13 @@ export class DatabaseManager {
           } catch (reconnectError) {
             console.error('❌ Failed to reconnect after prepared statement error:', reconnectError);
           }
+        }
+        
+        // Check for connection pool exhaustion
+        if (errorMessage.includes('connection') && errorMessage.includes('timeout')) {
+          console.warn(`⚠️ Connection timeout detected, attempt ${attempt}/${maxRetries}`);
+          // Force a health check to refresh connections
+          await this.healthCheck();
         }
         
         if (attempt === maxRetries) {

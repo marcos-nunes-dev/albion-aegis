@@ -15,8 +15,8 @@ import { httpLogger } from '../log.js';
 import { metrics } from '../metrics.js';
 
 // Rate limiting tracking
-const RATE_LIMIT_WINDOW_SIZE = 200; // Track last 200 requests
-const RATE_LIMIT_THRESHOLD = 0.05; // 5% threshold for slowdown
+const RATE_LIMIT_WINDOW_SIZE = 300; // Increased from 200 to 300 requests for better averaging
+const RATE_LIMIT_THRESHOLD = 0.03; // Reduced from 0.05 to 0.03 (3% threshold for slowdown)
 
 interface RateLimitEntry {
   timestamp: number;
@@ -75,15 +75,17 @@ const limiter = new Bottleneck({
   reservoir: config.RATE_MAX_RPS, // Initial tokens
   reservoirRefreshAmount: config.RATE_MAX_RPS, // Tokens to add
   reservoirRefreshInterval: 1000, // Every 1 second
-  maxConcurrent: 1, // One request at a time to respect rate limits
+  maxConcurrent: 2, // Increased from 1 to 2 for better throughput
   minTime: Math.floor(1000 / config.RATE_MAX_RPS), // Minimum time between requests
+  retryCount: 3, // Add retry count for failed requests
+  retryDelay: 1000, // 1 second retry delay
 });
 
 // Exponential backoff configuration
 const BACKOFF_CONFIG = {
-  initialDelay: 1000, // 1 second
-  maxDelay: 30000, // 30 seconds cap
-  maxRetries: 5,
+  initialDelay: 500, // Reduced from 1000 to 500ms for faster recovery
+  maxDelay: 15000, // Reduced from 30000 to 15000ms cap
+  maxRetries: 3, // Reduced from 5 to 3 for faster failure detection
   backoffFactor: 2,
 };
 
