@@ -3,7 +3,6 @@
 import { getPrisma } from '../src/db/database.js';
 import { BattleGapRecoveryService } from '../src/services/battleGapRecovery.js';
 import { log } from '../src/log.js';
-import { config } from '../src/lib/config.js';
 
 const logger = log.child({ component: 'gap-recovery-app' });
 

@@ -382,7 +382,7 @@ async function testAntiFarming(args: string[]) {
   
   if (recentWins.length > 0) {
     console.log('📋 Recent battles:');
-    recentWins.slice(0, 5).forEach((win, index) => {
+    recentWins.slice(0, 5).forEach((win: any, index: number) => {
       console.log(`  ${index + 1}. Battle ${win.battleId} - ${win.processedAt.toISOString()}`);
     });
   }
