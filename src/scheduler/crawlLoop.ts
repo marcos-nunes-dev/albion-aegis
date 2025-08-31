@@ -4,6 +4,8 @@ import { shouldSlowDown, getRateLimitStats } from '../http/client.js';
 import { log } from '../log.js';
 import { cleanupOldJobs, aggressiveCleanup, comprehensiveCleanup, comprehensiveCleanupWithOrphanRemoval, getQueueStats } from '../queue/queues.js';
 import redis from '../queue/connection.js';
+import { BattleGapRecoveryService } from '../services/battleGapRecovery.js';
+import { getPrisma } from '../db/database.js';
 
 // Rate limiting state for slowdown tracking
 interface SlowdownState {
@@ -155,6 +157,7 @@ export function startCrawlLoop(): ReturnType<typeof setInterval> {
   });
   
   let crawlCount = 0;
+  let gapRecoveryCount = 0;
   
   const crawlInterval = setInterval(async () => {
     crawlCount++;
@@ -176,6 +179,31 @@ export function startCrawlLoop(): ReturnType<typeof setInterval> {
     try {
       // Run the battle crawl
       await runBattleCrawl();
+      
+      // Run gap recovery based on configured interval
+      if (crawlCount % config.GAP_RECOVERY_INTERVAL_CRAWLS === 0) {
+        gapRecoveryCount++;
+        log.info('Running gap recovery', { 
+          gapRecoveryNumber: gapRecoveryCount,
+          crawlNumber: crawlCount
+        });
+        
+        try {
+          const prisma = getPrisma();
+          const gapRecoveryService = new BattleGapRecoveryService(prisma);
+          await gapRecoveryService.runGapRecovery();
+          
+          log.info('Gap recovery completed', { 
+            gapRecoveryNumber: gapRecoveryCount 
+          });
+        } catch (gapError) {
+          log.error('Gap recovery failed', {
+            gapRecoveryNumber: gapRecoveryCount,
+            error: gapError instanceof Error ? gapError.message : 'Unknown error'
+          });
+          // Don't throw - gap recovery failure shouldn't stop the main crawl
+        }
+      }
       
       const duration = Date.now() - startTime;
       log.info('Crawl completed', { 

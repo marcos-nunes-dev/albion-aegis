@@ -43,6 +43,11 @@ const configSchema = z.object({
   // Battle Notifier Configuration
   BATTLE_NOTIFIER_CONCURRENCY: z.coerce.number().positive().default(2),
 
+  // Gap Recovery Configuration
+  GAP_RECOVERY_LOOKBACK_HOURS: z.coerce.number().positive().default(6),
+  GAP_RECOVERY_MAX_GAP_MINUTES: z.coerce.number().positive().default(30),
+  GAP_RECOVERY_INTERVAL_CRAWLS: z.coerce.number().positive().default(10),
+
   // Database Pool Configuration
   DATABASE_POOL_MIN: z.coerce.number().positive().default(3), // Increased from 1 to 3
   DATABASE_POOL_MAX: z.coerce.number().positive().default(20), // Increased from 10 to 20
@@ -96,6 +101,9 @@ export const getConfigSummary = () => ({
   DEBOUNCE_KILLS_MIN: config.DEBOUNCE_KILLS_MIN,
   RECHECK_DONE_BATTLE_HOURS: config.RECHECK_DONE_BATTLE_HOURS,
   BATTLE_NOTIFIER_CONCURRENCY: config.BATTLE_NOTIFIER_CONCURRENCY,
+  GAP_RECOVERY_LOOKBACK_HOURS: config.GAP_RECOVERY_LOOKBACK_HOURS,
+  GAP_RECOVERY_MAX_GAP_MINUTES: config.GAP_RECOVERY_MAX_GAP_MINUTES,
+  GAP_RECOVERY_INTERVAL_CRAWLS: config.GAP_RECOVERY_INTERVAL_CRAWLS,
   DATABASE_POOL_MIN: config.DATABASE_POOL_MIN,
   DATABASE_POOL_MAX: config.DATABASE_POOL_MAX,
   DATABASE_CONNECTION_TIMEOUT: config.DATABASE_CONNECTION_TIMEOUT,

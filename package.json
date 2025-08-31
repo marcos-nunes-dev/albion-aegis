@@ -12,6 +12,7 @@
     "start:kills": "tsx apps/kills-worker.ts",
     "start:notifier": "tsx apps/battle-notifier.ts",
     "start:metrics": "tsx apps/metrics-http.ts",
+    "start:gap-recovery": "tsx apps/gap-recovery.ts",
     "start:sweep-hourly": "tsx apps/deep-sweep-hourly.ts",
     "start:sweep-nightly": "tsx apps/deep-sweep-nightly.ts",
     "tracking:add": "tsx apps/manage-tracking.ts add",

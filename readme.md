@@ -13,6 +13,7 @@ A comprehensive battle tracking and guild ranking system for Albion Online, feat
 
 ### 🗡️ Battle Tracking
 - **Real-time Battle Crawling**: Automatic battle discovery and processing
+- **Battle Gap Recovery**: Intelligent detection and recovery of missed battles due to API delays
 - **Kill Event Processing**: Detailed kill event tracking and analysis
 - **Guild Tracking**: Monitor specific guilds and send battle notifications
 - **Metrics & Analytics**: Comprehensive battle statistics and reporting
@@ -67,6 +68,7 @@ yarn manage-mmr top-guilds 100
 
 ## 📚 Documentation
 
+- **[Battle Gap Recovery Guide](./BATTLE_GAP_RECOVERY_GUIDE.md)**: Intelligent battle recovery system
 - **[MMR Integration Guide](./MMR_INTEGRATION_GUIDE.md)**: Complete MMR system documentation
 - **[Railway Deployment Guide](./RAILWAY_DEPLOYMENT_GUIDE.md)**: Production deployment instructions
 - **[Database Connection Guide](./DATABASE_CONNECTION_GUIDE.md)**: Connection pooling and database optimization

@@ -791,4 +791,179 @@ export class BattleAnalysisService {
       return null;
     }
   }
+
+  /**
+   * Detect gaps in battle sequence and identify potentially missing battles
+   * This helps catch battles that were processed late by AlbionBB API
+   */
+  async detectBattleGaps(
+    startTime: Date,
+    endTime: Date,
+    maxGapMinutes: number = 30
+  ): Promise<Array<{ gapStart: Date; gapEnd: Date; estimatedMissingBattles: number }>> {
+    try {
+      logger.info('Detecting battle gaps', {
+        startTime: startTime.toISOString(),
+        endTime: endTime.toISOString(),
+        maxGapMinutes
+      });
+
+      // Get battles in time range, ordered by startedAt
+      const battles = await this.prisma.battle.findMany({
+        where: {
+          startedAt: {
+            gte: startTime,
+            lte: endTime
+          }
+        },
+        select: {
+          startedAt: true,
+          totalPlayers: true,
+          totalFame: true
+        },
+        orderBy: {
+          startedAt: 'asc'
+        }
+      });
+
+      if (battles.length < 2) {
+        logger.debug('Not enough battles to detect gaps', { battleCount: battles.length });
+        return [];
+      }
+
+      const gaps: Array<{ gapStart: Date; gapEnd: Date; estimatedMissingBattles: number }> = [];
+      const maxGapMs = maxGapMinutes * 60 * 1000;
+
+      // Analyze gaps between consecutive battles
+      for (let i = 0; i < battles.length - 1; i++) {
+        const currentBattle = battles[i];
+        const nextBattle = battles[i + 1];
+        const gapMs = nextBattle.startedAt.getTime() - currentBattle.startedAt.getTime();
+
+        if (gapMs > maxGapMs) {
+          // Calculate estimated missing battles based on average battle frequency
+          const avgBattleInterval = this.calculateAverageBattleInterval(battles, i);
+          const estimatedMissingBattles = Math.floor(gapMs / avgBattleInterval);
+
+          gaps.push({
+            gapStart: currentBattle.startedAt,
+            gapEnd: nextBattle.startedAt,
+            estimatedMissingBattles
+          });
+
+          logger.info('Battle gap detected', {
+            gapStart: currentBattle.startedAt.toISOString(),
+            gapEnd: nextBattle.startedAt.toISOString(),
+            gapMinutes: Math.round(gapMs / (60 * 1000)),
+            estimatedMissingBattles
+          });
+        }
+      }
+
+      return gaps;
+    } catch (error) {
+      logger.error('Failed to detect battle gaps', {
+        error: error instanceof Error ? error.message : 'Unknown error'
+      });
+      return [];
+    }
+  }
+
+  /**
+   * Calculate average battle interval around a specific index
+   */
+  private calculateAverageBattleInterval(
+    battles: Array<{ startedAt: Date }>,
+    centerIndex: number,
+    windowSize: number = 10
+  ): number {
+    const startIndex = Math.max(0, centerIndex - windowSize);
+    const endIndex = Math.min(battles.length - 1, centerIndex + windowSize);
+    
+    if (endIndex <= startIndex) {
+      return 5 * 60 * 1000; // Default 5 minutes if not enough data
+    }
+
+    let totalInterval = 0;
+    let intervalCount = 0;
+
+    for (let i = startIndex; i < endIndex; i++) {
+      const interval = battles[i + 1].startedAt.getTime() - battles[i].startedAt.getTime();
+      totalInterval += interval;
+      intervalCount++;
+    }
+
+    return intervalCount > 0 ? totalInterval / intervalCount : 5 * 60 * 1000;
+  }
+
+  /**
+   * Get battles that might have been missed due to API processing delays
+   * This performs a deeper scan in identified gap areas
+   */
+  async findPotentiallyMissingBattles(
+    gapStart: Date,
+    gapEnd: Date,
+    minPlayers: number = 10
+  ): Promise<Array<{ albionId: bigint; startedAt: Date; reason: string }>> {
+    try {
+      logger.info('Searching for potentially missing battles', {
+        gapStart: gapStart.toISOString(),
+        gapEnd: gapEnd.toISOString(),
+        minPlayers
+      });
+
+      // This would integrate with your HTTP client to search AlbionBB API
+      // for battles in the gap period that weren't in your database
+      const { getBattlesPage } = await import('../http/client.js');
+      
+      const missingBattles: Array<{ albionId: bigint; startedAt: Date; reason: string }> = [];
+      
+      // Search multiple pages to find battles in the gap
+      for (let page = 0; page < 5; page++) { // Limit to 5 pages to avoid excessive API calls
+        try {
+          const battles = await getBattlesPage(page, minPlayers);
+          
+          for (const battle of battles) {
+            const battleTime = new Date(battle.startedAt);
+            
+            // Check if this battle falls within our gap
+            if (battleTime >= gapStart && battleTime <= gapEnd) {
+              // Check if we already have this battle in our database
+              const existingBattle = await this.prisma.battle.findUnique({
+                where: { albionId: battle.albionId },
+                select: { albionId: true }
+              });
+
+              if (!existingBattle) {
+                missingBattles.push({
+                  albionId: battle.albionId,
+                  startedAt: battleTime,
+                  reason: 'Found in gap search'
+                });
+              }
+            }
+          }
+        } catch (error) {
+          logger.warn('Failed to search page for missing battles', {
+            page,
+            error: error instanceof Error ? error.message : 'Unknown error'
+          });
+          break; // Stop searching if we hit API issues
+        }
+      }
+
+      logger.info('Missing battles search completed', {
+        gapStart: gapStart.toISOString(),
+        gapEnd: gapEnd.toISOString(),
+        missingBattlesFound: missingBattles.length
+      });
+
+      return missingBattles;
+    } catch (error) {
+      logger.error('Failed to find potentially missing battles', {
+        error: error instanceof Error ? error.message : 'Unknown error'
+      });
+      return [];
+    }
+  }
 }
