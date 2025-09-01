@@ -57,6 +57,9 @@ export class BattleGapRecoveryService {
     let totalRecovered = 0;
     const pagesToCheck = config.GAP_RECOVERY_PAGES_TO_CHECK || 5; // Default to checking 3 pages
     
+    // Only process battles that are older than 10 minutes to avoid conflicts with main crawler
+    const cutoffTime = new Date(Date.now() - (10 * 60 * 1000)); // 10 minutes ago
+    
     // Check multiple pages to catch late-added battles
     for (let page = 0; page < pagesToCheck; page++) {
       try {
@@ -71,6 +74,18 @@ export class BattleGapRecoveryService {
 
         // Check each battle on this page
         for (const battle of battles) {
+          const battleStartTime = new Date(battle.startedAt);
+          
+          // Skip battles that are too recent (likely being processed by main crawler)
+          if (battleStartTime > cutoffTime) {
+            logger.debug('Skipping recent battle in gap recovery', {
+              albionId: battle.albionId.toString(),
+              startedAt: battle.startedAt,
+              cutoffTime: cutoffTime.toISOString()
+            });
+            continue;
+          }
+
           // Check if we already have this battle in our database
           const existingBattle = await this.prisma.battle.findUnique({
             where: { albionId: battle.albionId },
@@ -132,6 +147,9 @@ export class BattleGapRecoveryService {
         // Enqueue battle notification job
         try {
           await this.battleNotifierProducer.enqueueBattleNotification(battle.albionId);
+          logger.info('Enqueued notification job for recovered battle', {
+            albionId: battle.albionId.toString()
+          });
         } catch (error) {
           logger.warn('Failed to enqueue battle notification for recovered battle', {
             albionId: battle.albionId.toString(),

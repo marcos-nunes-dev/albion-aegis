@@ -45,6 +45,19 @@ async function upsertBattle(battle: BattleListItem) {
   return await executeWithRetry(async () => {
     const prisma = getPrisma();
     
+    // First, check if the battle already exists to avoid unnecessary API calls
+    const existingBattle = await prisma.battle.findUnique({
+      where: { albionId: battle.albionId }
+    });
+    
+    if (existingBattle) {
+      battleLogger.debug('Battle already exists, skipping processing', {
+        albionId: battle.albionId.toString(),
+        existingIngestedAt: existingBattle.ingestedAt
+      });
+      return { battle: existingBattle, wasCreated: false };
+    }
+    
     // Fetch complete battle data from API to get full guild/alliance information
     let completeBattleData: BattleDetail | null = null;
     try {
@@ -74,40 +87,23 @@ async function upsertBattle(battle: BattleListItem) {
       ingestedAt: new Date(),
     };
     
-    // Use Prisma's atomic upsert operation to handle race conditions
-    const upsertedBattle = await prisma.battle.upsert({
-      where: { albionId: battle.albionId },
-      update: battleData,
-      create: battleData
+    // Create the battle (we already checked it doesn't exist)
+    const createdBattle = await prisma.battle.create({
+      data: battleData
     });
     
-    // Check if this was a create or update by comparing the created/updated timestamp
-    // If the battle was just created, the ingestedAt should be very close to now
-    const now = new Date();
-    const timeDiff = Math.abs(now.getTime() - upsertedBattle.ingestedAt.getTime());
-    const wasCreated = timeDiff < 1000; // Within 1 second means it was just created
+    // Record metrics for new battle
+    metrics.recordBattleUpsert();
     
-    if (wasCreated) {
-      // Record metrics for new battle
-      metrics.recordBattleUpsert();
-      
-      battleLogger.info('Created new battle with complete data', {
-        albionId: battle.albionId.toString(),
-        hasCompleteData: !!completeBattleData,
-        guildCount: guildsData.length,
-        allianceCount: alliancesData.length,
-        totalPlayers: battle.totalPlayers
-      });
-    } else {
-      battleLogger.debug('Updated existing battle with complete data', {
-        albionId: battle.albionId.toString(),
-        hasCompleteData: !!completeBattleData,
-        guildCount: guildsData.length,
-        allianceCount: alliancesData.length
-      });
-    }
+    battleLogger.info('Created new battle with complete data', {
+      albionId: battle.albionId.toString(),
+      hasCompleteData: !!completeBattleData,
+      guildCount: guildsData.length,
+      allianceCount: alliancesData.length,
+      totalPlayers: battle.totalPlayers
+    });
     
-    return { battle: upsertedBattle, wasCreated };
+    return { battle: createdBattle, wasCreated: true };
   });
 }
 

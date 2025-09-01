@@ -14,7 +14,8 @@ export interface BattleNotificationJob {
 
 export class BattleNotifierWorker {
   private trackingService: TrackingService;
-  private processedBattles: Set<string> = new Set(); // Simple cache to prevent duplicate processing
+  private processedBattles: Map<string, number> = new Map(); // battleId -> timestamp
+  private readonly CACHE_TTL = 5 * 60 * 1000; // 5 minutes
 
   constructor(prisma: PrismaClient) {
     this.trackingService = new TrackingService(prisma);
@@ -35,53 +36,66 @@ export class BattleNotifierWorker {
 
     try {
       // Check if we've already processed this battle recently (simple cache)
-      if (this.processedBattles.has(battleId)) {
+      const now = Date.now();
+      const lastProcessed = this.processedBattles.get(battleId);
+      if (lastProcessed && (now - lastProcessed) < this.CACHE_TTL) {
         logger.info({
-          message: 'Battle already processed recently, skipping',
+          message: 'Battle processed recently, skipping',
           battleId: battleId,
-          jobId: job.id
+          lastProcessed: new Date(lastProcessed),
+          timeSinceLastProcessed: now - lastProcessed
         });
         return;
       }
 
-      // Get battle details
+      // Mark this battle as processed
+      this.processedBattles.set(battleId, now);
+
+      // Clean up old cache entries
+      this.cleanupCache();
+
+      // Fetch battle details
       const battleDetail = await getBattleDetail(battleIdBigInt);
       if (!battleDetail) {
         logger.warn({
-          message: 'Battle details not found',
+          message: 'Failed to fetch battle details',
           battleId: battleId
         });
         return;
       }
 
-      // Get all active tracking subscriptions
+      // Get all active subscriptions
       const subscriptions = await this.trackingService.getActiveSubscriptions();
-      
       if (subscriptions.length === 0) {
-        logger.debug({
-          message: 'No active tracking subscriptions found',
+        logger.info({
+          message: 'No active subscriptions found',
           battleId: battleId
         });
         return;
       }
 
       // Process each subscription
-      const notificationPromises = subscriptions.map(subscription =>
-        this.processSubscription(battleDetail, subscription)
-      );
-
-      await Promise.allSettled(notificationPromises);
-
-      // Add to processed cache (keep for 5 minutes to prevent immediate reprocessing)
-      this.processedBattles.add(battleId);
-      setTimeout(() => {
-        this.processedBattles.delete(battleId);
-      }, 5 * 60 * 1000); // 5 minutes
+      let processedCount = 0;
+      for (const subscription of subscriptions) {
+        try {
+          await this.processSubscription(battleDetail, subscription);
+          processedCount++;
+        } catch (error) {
+          logger.error({
+            message: 'Failed to process subscription for battle',
+            error: error instanceof Error ? error.message : String(error),
+            subscriptionId: subscription.id,
+            entityName: subscription.entityName,
+            battleId: battleId
+          });
+        }
+      }
 
       logger.info({
         message: 'Battle notification processing completed',
         battleId: battleId,
-        subscriptionCount: subscriptions.length
+        subscriptionsProcessed: processedCount,
+        totalSubscriptions: subscriptions.length
       });
 
     } catch (error) {
@@ -92,6 +106,18 @@ export class BattleNotifierWorker {
         jobId: job.id
       });
       throw error;
+    }
+  }
+
+  /**
+   * Clean up old cache entries
+   */
+  private cleanupCache(): void {
+    const now = Date.now();
+    for (const [battleId, timestamp] of this.processedBattles.entries()) {
+      if (now - timestamp > this.CACHE_TTL) {
+        this.processedBattles.delete(battleId);
+      }
     }
   }
 
