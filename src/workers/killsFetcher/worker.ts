@@ -6,6 +6,9 @@ import { config } from '../../lib/config.js';
 import type { KillEvent } from '../../types/albion.js';
 import redis from '../../queue/connection.js';
 import { MmrIntegrationService } from '../../services/mmrIntegration.js';
+import { log } from '../../log.js';
+
+const killsLogger = log.child({ component: 'kills-fetcher' });
 
 /**
  * Kills fetcher worker - processes jobs from killsFetchQueue
@@ -18,20 +21,20 @@ export function createKillsFetcherWorker(): Worker {
       const { albionId } = job.data;
       const jobId = job.id;
       
-      console.log(`🔪 [${jobId}] Processing kills for battle ${albionId}...`);
+             killsLogger.info('Processing kills for battle', { jobId, albionId });
       
       try {
-        // Fetch kill events from Albion API
-        console.log(`🌐 [${jobId}] Fetching kills from /battles/kills?ids=${albionId}...`);
-        const killEvents = await getKillsForBattle(BigInt(albionId));
+                 // Fetch kill events from Albion API
+         killsLogger.info('Fetching kills from API', { jobId, albionId });
+         const killEvents = await getKillsForBattle(BigInt(albionId));
+         
+         killsLogger.info('Received kill events', { jobId, albionId, killCount: killEvents.length });
         
-        console.log(`📊 [${jobId}] Received ${killEvents.length} kill events`);
-        
-        if (killEvents.length === 0) {
-          console.log(`📭 [${jobId}] No kill events found for battle ${albionId}`);
-          await markBattleKillsFetched(albionId);
-          return { processed: 0, inserted: 0, updated: 0 };
-        }
+                 if (killEvents.length === 0) {
+           killsLogger.info('No kill events found for battle', { jobId, albionId });
+           await markBattleKillsFetched(albionId);
+           return { processed: 0, inserted: 0, updated: 0 };
+         }
         
         // Process each kill event
         let insertedCount = 0;
@@ -45,30 +48,42 @@ export function createKillsFetcherWorker(): Worker {
             } else {
               updatedCount++;
             }
-          } catch (error) {
-            console.error(`❌ [${jobId}] Failed to upsert kill event ${killEvent.EventId}:`, error);
-            // Continue processing other kill events
-          }
+                     } catch (error) {
+             killsLogger.error('Failed to upsert kill event', { 
+               jobId, 
+               albionId, 
+               eventId: killEvent.EventId, 
+               error: error instanceof Error ? error.message : 'Unknown error' 
+             });
+             // Continue processing other kill events
+           }
         }
         
         // Mark battle as having kills fetched
         await markBattleKillsFetched(albionId);
         
-        // Process battle for MMR calculation
-        try {
-          console.log(`🏆 [${jobId}] Starting MMR processing for battle ${albionId}`);
-          await processBattleForMmr(albionId, killEvents);
-          console.log(`✅ [${jobId}] MMR processing completed for battle ${albionId}`);
-        } catch (error) {
-          console.error(`❌ [${jobId}] MMR processing failed for battle ${albionId}:`, error);
-          // Don't throw - MMR processing failure shouldn't fail the kills job
-        }
+                 // Process battle for MMR calculation
+         try {
+           killsLogger.info('Starting MMR processing for battle', { jobId, albionId });
+           await processBattleForMmr(albionId, killEvents);
+           killsLogger.info('MMR processing completed for battle', { jobId, albionId });
+         } catch (error) {
+           killsLogger.error('MMR processing failed for battle', { 
+             jobId, 
+             albionId, 
+             error: error instanceof Error ? error.message : 'Unknown error' 
+           });
+           // Don't throw - MMR processing failure shouldn't fail the kills job
+         }
         
-        const totalProcessed = insertedCount + updatedCount;
-        console.log(`✅ [${jobId}] Battle ${albionId} completed:`);
-        console.log(`   - Kill events processed: ${totalProcessed}`);
-        console.log(`   - New kill events: ${insertedCount}`);
-        console.log(`   - Updated kill events: ${updatedCount}`);
+                 const totalProcessed = insertedCount + updatedCount;
+         killsLogger.info('Battle processing completed', { 
+           jobId, 
+           albionId, 
+           totalProcessed, 
+           insertedCount, 
+           updatedCount 
+         });
         
         return {
           processed: totalProcessed,
@@ -76,10 +91,14 @@ export function createKillsFetcherWorker(): Worker {
           updated: updatedCount
         };
         
-      } catch (error) {
-        console.error(`❌ [${jobId}] Failed to process kills for battle ${albionId}:`, error);
-        throw error; // Re-throw to trigger job retry
-      }
+             } catch (error) {
+         killsLogger.error('Failed to process kills for battle', { 
+           jobId, 
+           albionId, 
+           error: error instanceof Error ? error.message : 'Unknown error' 
+         });
+         throw error; // Re-throw to trigger job retry
+       }
     },
     {
       connection: redis,
@@ -89,28 +108,28 @@ export function createKillsFetcherWorker(): Worker {
     }
   );
   
-  // Worker event handlers
-  worker.on('completed', (job, result) => {
-    if (job) {
-      const { albionId } = job.data;
-      console.log(`🎉 [${job.id}] Kills fetch completed for battle ${albionId}:`, result);
-    }
-  });
-  
-  worker.on('failed', (job, err) => {
-    if (job) {
-      const { albionId } = job.data;
-      console.error(`💥 [${job.id}] Kills fetch failed for battle ${albionId}:`, err.message);
-    }
-  });
-  
-  worker.on('error', (err) => {
-    console.error('🚨 Kills fetcher worker error:', err);
-  });
-  
-  worker.on('stalled', (jobId) => {
-    console.warn(`⚠️  Kills fetcher job ${jobId} stalled`);
-  });
+     // Worker event handlers
+   worker.on('completed', (job, result) => {
+     if (job) {
+       const { albionId } = job.data;
+       killsLogger.info('Kills fetch completed for battle', { jobId: job.id, albionId, result });
+     }
+   });
+   
+   worker.on('failed', (job, err) => {
+     if (job) {
+       const { albionId } = job.data;
+       killsLogger.error('Kills fetch failed for battle', { jobId: job.id, albionId, error: err.message });
+     }
+   });
+   
+   worker.on('error', (err) => {
+     killsLogger.error('Kills fetcher worker error', { error: err.message });
+   });
+   
+   worker.on('stalled', (jobId) => {
+     killsLogger.warn('Kills fetcher job stalled', { jobId });
+   });
   
   return worker;
 }
@@ -171,37 +190,41 @@ async function upsertKillEvent(killEvent: KillEvent, battleAlbionId: string) {
 /**
  * Process battle for MMR calculation with retry logic and connection pooling
  */
-async function processBattleForMmr(albionId: string, killEvents: KillEvent[]): Promise<void> {
-  return executeWithRetry(async () => {
-    console.log(`🏆 [KILLS-WORKER] Processing battle ${albionId} for MMR calculation`);
-    
-    const prisma = getPrisma();
-    
-    // Get battle data from database
-    const battle = await prisma.battle.findUnique({
-      where: { albionId: BigInt(albionId) }
-    });
-    
-    if (!battle) {
-      console.log(`❌ [KILLS-WORKER] Battle ${albionId} not found for MMR processing`);
-      return;
-    }
-    
-    console.log(`📊 [KILLS-WORKER] Found battle ${albionId}: ${battle.totalPlayers} players, ${battle.totalFame} fame`);
-    
-    // Initialize MMR integration service
-    const mmrIntegration = new MmrIntegrationService(prisma);
-    
-    // Process battle for MMR
-    await mmrIntegration.processBattleForMmr(
-      BigInt(albionId),
-      battle,
-      killEvents
-    );
-    
-    console.log(`✅ [KILLS-WORKER] MMR processing queued for battle ${albionId}`);
-  });
-}
+ async function processBattleForMmr(albionId: string, killEvents: KillEvent[]): Promise<void> {
+   return executeWithRetry(async () => {
+     killsLogger.info('Processing battle for MMR calculation', { albionId });
+     
+     const prisma = getPrisma();
+     
+     // Get battle data from database
+     const battle = await prisma.battle.findUnique({
+       where: { albionId: BigInt(albionId) }
+     });
+     
+     if (!battle) {
+       killsLogger.warn('Battle not found for MMR processing', { albionId });
+       return;
+     }
+     
+     killsLogger.info('Found battle for MMR processing', { 
+       albionId, 
+       totalPlayers: battle.totalPlayers, 
+       totalFame: battle.totalFame 
+     });
+     
+     // Initialize MMR integration service
+     const mmrIntegration = new MmrIntegrationService(prisma);
+     
+     // Process battle for MMR
+     await mmrIntegration.processBattleForMmr(
+       BigInt(albionId),
+       battle,
+       killEvents
+     );
+     
+     killsLogger.info('MMR processing queued for battle', { albionId });
+   });
+ }
 
 /**
  * Mark a battle as having kills fetched with retry logic and connection pooling
@@ -220,34 +243,36 @@ async function markBattleKillsFetched(albionId: string): Promise<void> {
 /**
  * Start the kills fetcher worker
  */
-export function startKillsFetcherWorker(): Worker {
-  console.log('🔪 Starting kills fetcher worker with enhanced database connection pooling...');
-  
-  const worker = createKillsFetcherWorker();
-  
-  // Start automatic cleanup every 10 minutes
-  const cleanupInterval = setInterval(async () => {
-    try {
-      console.log('🧹 Kills worker performing automatic cleanup...');
-      await cleanupOldJobs();
-      console.log('✅ Kills worker cleanup completed');
-    } catch (error) {
-      console.error('❌ Kills worker cleanup failed:', error);
-    }
-  }, config.REDIS_WORKER_CLEANUP_INTERVAL_MIN * 60 * 1000);
-  
-  // Graceful shutdown
-  process.on('SIGTERM', async () => {
-    console.log('🛑 Shutting down kills fetcher worker...');
-    clearInterval(cleanupInterval);
-    await worker.close();
-  });
-  
-  process.on('SIGINT', async () => {
-    console.log('🛑 Shutting down kills fetcher worker...');
-    clearInterval(cleanupInterval);
-    await worker.close();
-  });
-  
-  return worker;
-}
+ export function startKillsFetcherWorker(): Worker {
+   killsLogger.info('Starting kills fetcher worker with enhanced database connection pooling');
+   
+   const worker = createKillsFetcherWorker();
+   
+   // Start automatic cleanup every 10 minutes
+   const cleanupInterval = setInterval(async () => {
+     try {
+       killsLogger.info('Kills worker performing automatic cleanup');
+       await cleanupOldJobs();
+       killsLogger.info('Kills worker cleanup completed');
+     } catch (error) {
+       killsLogger.error('Kills worker cleanup failed', { 
+         error: error instanceof Error ? error.message : 'Unknown error' 
+       });
+     }
+   }, config.REDIS_WORKER_CLEANUP_INTERVAL_MIN * 60 * 1000);
+   
+   // Graceful shutdown
+   process.on('SIGTERM', async () => {
+     killsLogger.info('Shutting down kills fetcher worker');
+     clearInterval(cleanupInterval);
+     await worker.close();
+   });
+   
+   process.on('SIGINT', async () => {
+     killsLogger.info('Shutting down kills fetcher worker');
+     clearInterval(cleanupInterval);
+     await worker.close();
+   });
+   
+   return worker;
+ }

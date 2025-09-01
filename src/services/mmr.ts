@@ -723,9 +723,10 @@ export class MmrService {
     battleId: bigint
   ): Promise<void> {
     try {
-      console.log(
-        `🏆 [PRIME-TIME-MASS] Updating prime time mass for battle ${battleId} (${playerCount} players)`
-      );
+      logger.debug('Updating prime time mass for battle', {
+        battleId: battleId.toString(),
+        playerCount
+      });
 
       // Get the battle to determine which prime time window it falls into
       const battle = await this.prisma.battle.findUnique({
@@ -733,9 +734,6 @@ export class MmrService {
       });
 
       if (!battle) {
-        console.log(
-          `❌ [PRIME-TIME-MASS] Battle ${battleId} not found for prime time mass update`
-        );
         logger.warn("Battle not found for prime time mass update", {
           battleId: battleId.toString(),
         });
@@ -744,15 +742,17 @@ export class MmrService {
 
       // Get global prime time windows
       const primeTimeWindows = await this.prisma.primeTimeWindow.findMany();
-      console.log(
-        `📊 [PRIME-TIME-MASS] Found ${primeTimeWindows.length} prime time windows`
-      );
+      logger.debug('Found prime time windows', {
+        battleId: battleId.toString(),
+        windowCount: primeTimeWindows.length
+      });
 
       // Find which prime time window this battle falls into
       const battleHour = battle.startedAt.getUTCHours();
-      console.log(
-        `📊 [PRIME-TIME-MASS] Battle ${battleId} hour: ${battleHour} UTC`
-      );
+      logger.debug('Battle hour for prime time analysis', {
+        battleId: battleId.toString(),
+        battleHour
+      });
 
       const matchingWindow = primeTimeWindows.find((window) => {
         if (window.startHour <= window.endHour) {
@@ -765,15 +765,6 @@ export class MmrService {
       });
 
       if (!matchingWindow) {
-        console.log(
-          `❌ [PRIME-TIME-MASS] Battle ${battleId} does not fall into any prime time window`
-        );
-        console.log(`   - Battle hour: ${battleHour}`);
-        console.log(
-          `   - Available windows: ${primeTimeWindows
-            .map((w) => `${w.startHour}-${w.endHour}`)
-            .join(", ")}`
-        );
         logger.debug("Battle does not fall into any prime time window", {
           battleId: battleId.toString(),
           battleHour,
@@ -784,9 +775,11 @@ export class MmrService {
         return;
       }
 
-      console.log(
-        `✅ [PRIME-TIME-MASS] Found matching prime time window: ${matchingWindow.startHour}-${matchingWindow.endHour} for battle ${battleId}`
-      );
+      logger.debug('Found matching prime time window', {
+        battleId: battleId.toString(),
+        windowStart: matchingWindow.startHour,
+        windowEnd: matchingWindow.endHour
+      });
 
       // TODO: Uncomment when Prisma client is regenerated with new GuildPrimeTimeMass model
       /*
@@ -1374,38 +1367,31 @@ export class MmrService {
     const hasSignificantParticipation =
       participationScore >= 2 || isFromMajorAlliance;
 
-    // Log detailed participation analysis
-    console.log(
-      `📊 [MMR-SERVICE] Guild ${guildStat.guildName} participation analysis:`
-    );
-    console.log(
-      `   - Fame: ${guildFameParticipation.toLocaleString()} / ${totalBattleFame.toLocaleString()} (${(
-        fameRatio * 100
-      ).toFixed(2)}%) [threshold: ${(adjustedFameThreshold * 100).toFixed(2)}%]`
-    );
-    console.log(
-      `   - Kills+Deaths: ${guildKillsDeaths} / ${totalBattleKillsDeaths} (${(
-        killsDeathsRatio * 100
-      ).toFixed(2)}%) [threshold: ${(
-        adjustedKillsDeathsThreshold * 100
-      ).toFixed(2)}%]`
-    );
-    console.log(
-      `   - Players: ${guildStat.players} / ${totalBattlePlayers} (${(
-        playerRatio * 100
-      ).toFixed(2)}%) [threshold: ${(adjustedPlayerThreshold * 100).toFixed(
-        2
-      )}%]`
-    );
-    console.log(
-      `   - From major alliance: ${isFromMajorAlliance ? "YES" : "NO"}`
-    );
-    console.log(`   - Participation score: ${participationScore}/3`);
-    console.log(
-      `   - Result: ${
-        hasSignificantParticipation ? "✅ INCLUDED" : "❌ EXCLUDED"
-      }`
-    );
+    // Log detailed participation analysis (debug level to reduce Railway rate limiting)
+    logger.debug('Guild participation analysis', {
+      guildName: guildStat.guildName,
+      fameParticipation: {
+        guild: guildFameParticipation,
+        total: totalBattleFame,
+        ratio: fameRatio,
+        threshold: adjustedFameThreshold
+      },
+      killsDeathsParticipation: {
+        guild: guildKillsDeaths,
+        total: totalBattleKillsDeaths,
+        ratio: killsDeathsRatio,
+        threshold: adjustedKillsDeathsThreshold
+      },
+      playerParticipation: {
+        guild: guildStat.players,
+        total: totalBattlePlayers,
+        ratio: playerRatio,
+        threshold: adjustedPlayerThreshold
+      },
+      isFromMajorAlliance,
+      participationScore,
+      hasSignificantParticipation
+    });
 
     return hasSignificantParticipation;
   }
