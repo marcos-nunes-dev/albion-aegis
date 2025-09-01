@@ -26,35 +26,15 @@ export class BattleGapRecoveryService {
     logger.info('Starting battle gap recovery process');
     
     const startTime = Date.now();
-    const now = new Date();
-    
-    // Look back further than the normal crawl to catch delayed battles
-    const lookbackHours = config.GAP_RECOVERY_LOOKBACK_HOURS;
-    const recoveryStart = new Date(now.getTime() - (lookbackHours * 60 * 60 * 1000));
     
     try {
-      // Step 1: Detect gaps in recent battle data
-      const gaps = await this.detectGaps(recoveryStart, now);
+      // Step 1: Fetch recent battles from API and check for missing ones
+      const recoveredCount = await this.detectAndRecoverMissingBattles();
       
-      if (gaps.length === 0) {
-        logger.info('No significant gaps detected, recovery complete');
-        return;
-      }
-
-      logger.info('Gaps detected, starting recovery', { gapCount: gaps.length });
-
-      // Step 2: For each gap, search for missing battles
-      let totalRecovered = 0;
-      for (const gap of gaps) {
-        const recovered = await this.recoverBattlesInGap(gap);
-        totalRecovered += recovered;
-      }
-
       const duration = Date.now() - startTime;
       logger.info('Battle gap recovery completed', {
         duration,
-        gapsProcessed: gaps.length,
-        battlesRecovered: totalRecovered
+        battlesRecovered: recoveredCount
       });
 
     } catch (error) {
@@ -68,119 +48,20 @@ export class BattleGapRecoveryService {
   }
 
   /**
-   * Detect significant gaps in battle data
+   * Detect and recover missing battles by checking recent API results
+   * This catches battles that were added late to the API
    */
-  private async detectGaps(
-    startTime: Date,
-    endTime: Date,
-    maxGapMinutes: number = config.GAP_RECOVERY_MAX_GAP_MINUTES
-  ): Promise<Array<{ gapStart: Date; gapEnd: Date; estimatedMissingBattles: number }>> {
-    logger.info('Detecting battle gaps', {
-      startTime: startTime.toISOString(),
-      endTime: endTime.toISOString(),
-      maxGapMinutes
-    });
-
-    // Get battles in time range, ordered by startedAt
-    const battles = await this.prisma.battle.findMany({
-      where: {
-        startedAt: {
-          gte: startTime,
-          lte: endTime
-        }
-      },
-      select: {
-        startedAt: true,
-        totalPlayers: true,
-        totalFame: true
-      },
-      orderBy: {
-        startedAt: 'asc'
-      }
-    });
-
-    if (battles.length < 2) {
-      logger.debug('Not enough battles to detect gaps', { battleCount: battles.length });
-      return [];
-    }
-
-    const gaps: Array<{ gapStart: Date; gapEnd: Date; estimatedMissingBattles: number }> = [];
-    const maxGapMs = maxGapMinutes * 60 * 1000;
-
-    // Analyze gaps between consecutive battles
-    for (let i = 0; i < battles.length - 1; i++) {
-      const currentBattle = battles[i];
-      const nextBattle = battles[i + 1];
-      const gapMs = nextBattle.startedAt.getTime() - currentBattle.startedAt.getTime();
-
-      if (gapMs > maxGapMs) {
-        // Calculate estimated missing battles based on average battle frequency
-        const avgBattleInterval = this.calculateAverageBattleInterval(battles, i);
-        const estimatedMissingBattles = Math.floor(gapMs / avgBattleInterval);
-
-        gaps.push({
-          gapStart: currentBattle.startedAt,
-          gapEnd: nextBattle.startedAt,
-          estimatedMissingBattles
-        });
-
-        logger.info('Battle gap detected', {
-          gapStart: currentBattle.startedAt.toISOString(),
-          gapEnd: nextBattle.startedAt.toISOString(),
-          gapMinutes: Math.round(gapMs / (60 * 1000)),
-          estimatedMissingBattles
-        });
-      }
-    }
-
-    return gaps;
-  }
-
-  /**
-   * Calculate average battle interval around a specific index
-   */
-  private calculateAverageBattleInterval(
-    battles: Array<{ startedAt: Date }>,
-    centerIndex: number,
-    windowSize: number = 10
-  ): number {
-    const startIndex = Math.max(0, centerIndex - windowSize);
-    const endIndex = Math.min(battles.length - 1, centerIndex + windowSize);
+  private async detectAndRecoverMissingBattles(): Promise<number> {
+    logger.info('Detecting missing battles from recent API results');
     
-    if (endIndex <= startIndex) {
-      return 5 * 60 * 1000; // Default 5 minutes if not enough data
-    }
-
-    let totalInterval = 0;
-    let intervalCount = 0;
-
-    for (let i = startIndex; i < endIndex; i++) {
-      const interval = battles[i + 1].startedAt.getTime() - battles[i].startedAt.getTime();
-      totalInterval += interval;
-      intervalCount++;
-    }
-
-    return intervalCount > 0 ? totalInterval / intervalCount : 5 * 60 * 1000;
-  }
-
-  /**
-   * Recover battles in a specific gap
-   */
-  private async recoverBattlesInGap(
-    gap: { gapStart: Date; gapEnd: Date; estimatedMissingBattles: number }
-  ): Promise<number> {
-    logger.info('Recovering battles in gap', {
-      gapStart: gap.gapStart.toISOString(),
-      gapEnd: gap.gapEnd.toISOString(),
-      estimatedMissingBattles: gap.estimatedMissingBattles
-    });
-
-    let recoveredCount = 0;
-    const maxPagesToSearch = Math.min(10, Math.ceil(gap.estimatedMissingBattles / 10) + 2);
-
-    // Search multiple pages to find battles in the gap
-    for (let page = 0; page < maxPagesToSearch; page++) {
+    let totalRecovered = 0;
+    const pagesToCheck = config.GAP_RECOVERY_PAGES_TO_CHECK || 5; // Default to checking 3 pages
+    
+    // Check multiple pages to catch late-added battles
+    for (let page = 0; page < pagesToCheck; page++) {
       try {
+        logger.info(`Checking page ${page + 1} for missing battles`);
+        
         const battles = await getBattlesPage(page, 10); // minPlayers = 10
         
         if (battles.length === 0) {
@@ -188,67 +69,52 @@ export class BattleGapRecoveryService {
           break;
         }
 
-        let allBattlesOlderThanGap = true;
-
+        // Check each battle on this page
         for (const battle of battles) {
-          const battleTime = new Date(battle.startedAt);
-          
-          // Check if this battle falls within our gap
-          if (battleTime >= gap.gapStart && battleTime <= gap.gapEnd) {
-            allBattlesOlderThanGap = false;
-            
-            // Check if we already have this battle in our database
-            const existingBattle = await this.prisma.battle.findUnique({
-              where: { albionId: battle.albionId },
-              select: { albionId: true }
-            });
+          // Check if we already have this battle in our database
+          const existingBattle = await this.prisma.battle.findUnique({
+            where: { albionId: battle.albionId },
+            select: { albionId: true }
+          });
 
-            if (!existingBattle) {
-              // This is a missing battle! Recover it
-              const recovered = await this.recoverBattle(battle);
-              if (recovered) {
-                recoveredCount++;
-                logger.info('Recovered missing battle', {
-                  albionId: battle.albionId.toString(),
-                  startedAt: battle.startedAt,
-                  gapStart: gap.gapStart.toISOString(),
-                  gapEnd: gap.gapEnd.toISOString()
-                });
-              }
-            }
-          } else if (battleTime < gap.gapStart) {
-            // We've gone too far back, stop searching
-            logger.debug('Reached battles older than gap, stopping search', {
-              page,
-              battleTime: battleTime.toISOString(),
-              gapStart: gap.gapStart.toISOString()
+          if (!existingBattle) {
+            // This is a missing battle! Recover it
+            logger.info('Found missing battle on API', {
+              albionId: battle.albionId.toString(),
+              startedAt: battle.startedAt,
+              page: page + 1
             });
-            return recoveredCount;
+            
+            const recovered = await this.recoverBattle(battle);
+            if (recovered) {
+              totalRecovered++;
+              logger.info('Recovered missing battle', {
+                albionId: battle.albionId.toString(),
+                startedAt: battle.startedAt,
+                page: page + 1
+              });
+            }
           }
         }
 
-        // If all battles on this page are older than our gap, we can stop
-        if (allBattlesOlderThanGap) {
-          logger.debug('All battles on page are older than gap, stopping search', { page });
-          break;
-        }
+        // If we found no missing battles on this page, continue to next page
+        // This ensures we catch battles that might have been added late to earlier pages
 
       } catch (error) {
-        logger.warn('Failed to search page for missing battles', {
-          page,
+        logger.warn('Failed to check page for missing battles', {
+          page: page + 1,
           error: error instanceof Error ? error.message : 'Unknown error'
         });
         break; // Stop searching if we hit API issues
       }
     }
 
-    logger.info('Gap recovery completed', {
-      gapStart: gap.gapStart.toISOString(),
-      gapEnd: gap.gapEnd.toISOString(),
-      battlesRecovered: recoveredCount
+    logger.info('Missing battle detection completed', {
+      pagesChecked: pagesToCheck,
+      battlesRecovered: totalRecovered
     });
 
-    return recoveredCount;
+    return totalRecovered;
   }
 
   /**

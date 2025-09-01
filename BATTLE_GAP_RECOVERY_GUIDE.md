@@ -4,43 +4,40 @@ A sophisticated system to detect and recover battles that were missed due to Alb
 
 ## 🎯 Problem Statement
 
-The AlbionBB API processes battles asynchronously, which can lead to battles appearing out of chronological order. This creates gaps in battle data where battles that were processed later by the API are missed by the standard watermark-based crawling system.
+The AlbionBB API processes battles asynchronously, which can lead to battles appearing out of chronological order. This creates situations where battles that were processed later by the API are missed by the standard watermark-based crawling system.
 
 ### Example Scenario:
 ```
-First Run:
-- Battle 4 (watermark set here)
-- Battle 2  
-- Battle 1
+Fetch 1:
+- Battle 12334 (most recent)
+- Battle 22334
+- Battle 42334
 
-Next Run:
-- Battle 6 (watermark advances here)
-- Battle 5
-- Battle 4
-- Battle 3 ← MISSED! (was behind Battle 4 watermark)
-- Battle 2
-- Battle 1
+Fetch 2:
+- Battle 02312 (most recent)
+- Battle 12334
+- Battle 22334
+- Battle 31239 ← LATE ADDED! (wasn't in previous fetch)
+- Battle 42334
 ```
 
 ## 🏗️ Solution Architecture
 
-The Battle Gap Recovery System uses a multi-layered approach:
+The Battle Gap Recovery System uses a direct API checking approach:
 
-### 1. **Gap Detection**
-- Analyzes battle timestamps in the database
-- Identifies gaps larger than a configurable threshold (default: 30 minutes)
-- Calculates estimated missing battles based on average battle frequency
+### 1. **API Page Scanning**
+- Fetches recent battle pages from the AlbionBB API
+- Checks each battle ID against the local database
+- Identifies battles that exist in the API but not in the database
 
-### 2. **Intelligent Recovery**
-- Searches AlbionBB API in identified gap periods
-- Cross-references with existing database records
-- Recovers only truly missing battles
+### 2. **Missing Battle Recovery**
+- Recovers only truly missing battles (not in database)
+- Fetches complete battle data from the API
 - Enqueues kill fetching and notification jobs for recovered battles
 
 ### 3. **Performance Optimization**
-- Configurable lookback period (default: 6 hours)
+- Configurable number of pages to check (default: 3 pages)
 - Smart page limiting to avoid excessive API calls
-- Early termination when gaps are fully searched
 - Integrated with existing queue system
 
 ## ⚙️ Configuration
@@ -49,8 +46,7 @@ Add these environment variables to configure the gap recovery system:
 
 ```bash
 # Gap Recovery Configuration
-GAP_RECOVERY_LOOKBACK_HOURS=6        # How far back to look for gaps
-GAP_RECOVERY_MAX_GAP_MINUTES=30      # Minimum gap size to trigger recovery
+GAP_RECOVERY_PAGES_TO_CHECK=3        # Number of API pages to check for missing battles
 GAP_RECOVERY_INTERVAL_CRAWLS=10      # Run recovery every N crawls
 ```
 
@@ -58,8 +54,7 @@ GAP_RECOVERY_INTERVAL_CRAWLS=10      # Run recovery every N crawls
 
 | Setting | Default | Description |
 |---------|---------|-------------|
-| `GAP_RECOVERY_LOOKBACK_HOURS` | 6 | Hours to look back for gaps |
-| `GAP_RECOVERY_MAX_GAP_MINUTES` | 30 | Minimum gap size (minutes) to trigger recovery |
+| `GAP_RECOVERY_PAGES_TO_CHECK` | 3 | Number of API pages to check for missing battles |
 | `GAP_RECOVERY_INTERVAL_CRAWLS` | 10 | Run recovery every N crawls (with 30s intervals = ~5 minutes) |
 
 ## 🚀 Usage
@@ -92,8 +87,7 @@ gap-recovery:
   environment:
     - DATABASE_URL=${DATABASE_URL}
     - REDIS_URL=${REDIS_URL}
-    - GAP_RECOVERY_LOOKBACK_HOURS=6
-    - GAP_RECOVERY_MAX_GAP_MINUTES=30
+    - GAP_RECOVERY_PAGES_TO_CHECK=3
   depends_on:
     - redis
     - postgres
@@ -103,36 +97,25 @@ gap-recovery:
 
 The system provides comprehensive logging:
 
-### Gap Detection Logs
+### API Page Checking Logs
 ```
-INFO: Detecting battle gaps
-  startTime: "2024-01-15T10:00:00.000Z"
-  endTime: "2024-01-15T16:00:00.000Z"
-  maxGapMinutes: 30
-
-INFO: Battle gap detected
-  gapStart: "2024-01-15T12:30:00.000Z"
-  gapEnd: "2024-01-15T13:15:00.000Z"
-  gapMinutes: 45
-  estimatedMissingBattles: 3
+INFO: Detecting missing battles from recent API results
+INFO: Checking page 1 for missing battles
+INFO: Found missing battle on API
+  albionId: "123456789"
+  startedAt: "2024-01-15T12:45:00.000Z"
+  page: 1
 ```
 
 ### Recovery Logs
 ```
-INFO: Recovering battles in gap
-  gapStart: "2024-01-15T12:30:00.000Z"
-  gapEnd: "2024-01-15T13:15:00.000Z"
-  estimatedMissingBattles: 3
-
 INFO: Recovered missing battle
   albionId: "123456789"
   startedAt: "2024-01-15T12:45:00.000Z"
-  gapStart: "2024-01-15T12:30:00.000Z"
-  gapEnd: "2024-01-15T13:15:00.000Z"
+  page: 1
 
-INFO: Gap recovery completed
-  gapStart: "2024-01-15T12:30:00.000Z"
-  gapEnd: "2024-01-15T13:15:00.000Z"
+INFO: Missing battle detection completed
+  pagesChecked: 3
   battlesRecovered: 2
 ```
 
@@ -141,104 +124,78 @@ INFO: Gap recovery completed
 ### Core Components
 
 1. **BattleGapRecoveryService** (`src/services/battleGapRecovery.ts`)
-   - Main service for gap detection and recovery
-   - Integrates with existing battle crawling logic
-   - Handles database operations and API calls
+   - Main service for detecting and recovering missing battles
+   - Fetches recent API pages and cross-references with database
+   - Handles battle recovery and job enqueuing
 
-2. **Enhanced Scheduler** (`src/scheduler/crawlLoop.ts`)
-   - Automatically runs gap recovery at configurable intervals
-   - Integrated with existing crawl loop
-   - Graceful error handling
+2. **Configuration** (`src/lib/config.ts`)
+   - `GAP_RECOVERY_PAGES_TO_CHECK`: Number of API pages to check
+   - `GAP_RECOVERY_INTERVAL_CRAWLS`: How often to run recovery
 
-3. **Configuration** (`src/lib/config.ts`)
-   - Configurable parameters for fine-tuning
-   - Environment variable support
-   - Type-safe configuration
+3. **Integration** (`src/scheduler/crawlLoop.ts`)
+   - Automatically runs gap recovery every N crawls
+   - Integrated with main battle crawling system
 
-### Database Integration
-- Uses existing Prisma models
-- No additional database schema required
-- Leverages existing battle and kill event tables
+### Key Methods
 
-### Queue Integration
-- Enqueues kill fetching jobs for recovered battles
-- Enqueues battle notification jobs
-- Uses existing BullMQ infrastructure
+#### `detectAndRecoverMissingBattles()`
+- Fetches recent battle pages from the API
+- Checks each battle ID against the database
+- Recovers missing battles and enqueues processing jobs
 
-## 📈 Performance Considerations
+#### `recoverBattle(battle: BattleListItem)`
+- Fetches complete battle data from the API
+- Upserts battle to the database
+- Enqueues kill fetching and notification jobs
 
-### API Rate Limiting
-- Respects existing rate limiting
-- Configurable page limits to avoid excessive calls
-- Early termination when gaps are fully searched
+## 🎯 How It Works
 
-### Database Performance
-- Efficient queries with proper indexing
-- Minimal database impact
-- Reuses existing connection pooling
+1. **Page Fetching**: The system fetches the most recent N pages from the `/battles` API endpoint
+2. **Database Check**: For each battle on these pages, it checks if the battle ID exists in the local database
+3. **Recovery**: If a battle exists in the API but not in the database, it's recovered
+4. **Processing**: Recovered battles go through the same processing pipeline as regular battles
 
-### Memory Usage
-- Streaming processing for large datasets
-- Configurable batch sizes
-- Automatic cleanup of temporary data
+### Example Flow:
+```
+1. Fetch pages 0, 1, 2 from /battles API
+2. Get battle IDs: [12334, 22334, 31239, 42334, ...]
+3. Check database for each ID
+4. Find missing: [31239] ← This battle was added late to API
+5. Recover battle 31239 with full data
+6. Enqueue kill fetching and notifications
+```
 
-## 🛠️ Troubleshooting
+## 🔍 Troubleshooting
 
 ### Common Issues
 
-1. **No gaps detected**
-   - Check `GAP_RECOVERY_MAX_GAP_MINUTES` setting
-   - Verify battle data exists in the time range
-   - Check logs for gap detection details
+**No battles being recovered:**
+- Check `GAP_RECOVERY_PAGES_TO_CHECK` setting
+- Verify API connectivity and rate limits
+- Check logs for API errors
 
-2. **Recovery not finding battles**
-   - Verify AlbionBB API connectivity
-   - Check rate limiting status
-   - Review gap search parameters
+**Too many API calls:**
+- Reduce `GAP_RECOVERY_PAGES_TO_CHECK`
+- Increase `GAP_RECOVERY_INTERVAL_CRAWLS`
 
-3. **Performance issues**
-   - Reduce `GAP_RECOVERY_LOOKBACK_HOURS`
-   - Increase `GAP_RECOVERY_INTERVAL_CRAWLS`
-   - Monitor API rate limiting
+**Performance issues:**
+- Monitor database query performance
+- Check Redis queue health
+- Review battle processing pipeline
 
-### Debug Commands
-```bash
-# Check current configuration
-yarn start:gap-recovery
+### Monitoring
 
-# Monitor logs for gap detection
-tail -f logs/app.log | grep "gap"
+The system logs detailed information about:
+- Pages checked and battles found
+- Missing battles detected and recovered
+- API errors and recovery failures
+- Processing times and performance metrics
 
-# Check battle data distribution
-# (Use your database client to query battle timestamps)
-```
+## 🚀 Performance Considerations
 
-## 🔮 Future Enhancements
+- **API Rate Limiting**: Respects existing rate limiting configuration
+- **Database Efficiency**: Uses efficient queries to check battle existence
+- **Queue Integration**: Leverages existing queue system for processing
+- **Configurable Scope**: Adjustable page count to balance coverage vs performance
 
-### Potential Improvements
-1. **Machine Learning Gap Prediction**
-   - Analyze historical patterns
-   - Predict likely gap locations
-   - Proactive recovery
-
-2. **Advanced Gap Analysis**
-   - Battle size correlation
-   - Time-of-day patterns
-   - Server-specific delays
-
-3. **Real-time Gap Detection**
-   - Stream processing
-   - Immediate recovery
-   - Webhook notifications
-
-4. **Performance Optimization**
-   - Parallel gap processing
-   - Caching strategies
-   - Adaptive search algorithms
-
-## 📚 Related Documentation
-
-- [MMR Integration Guide](./MMR_INTEGRATION_GUIDE.md)
-- [Performance Optimization Guide](./PERFORMANCE_OPTIMIZATION_GUIDE.md)
-- [Database Connection Guide](./DATABASE_CONNECTION_GUIDE.md)
-- [Railway Deployment Guide](./RAILWAY_DEPLOYMENT_GUIDE.md)
+This approach ensures you catch battles that were added late to the API, maintaining data completeness in your Albion Online battle tracking system!
