@@ -17,17 +17,30 @@ const MMR_CONSTANTS = {
   BATTLE_DURATION_WEIGHT: 0.03, // 3% weight for battle duration (reduced from 5%)
   KILL_CLUSTERING_WEIGHT: 0.02, // 2% weight for kill clustering (reduced from 5%)
   OPPONENT_MMR_WEIGHT: 0.15, // 15% weight for opponent MMR strength (reduced from 20%)
-  INDIVIDUAL_PERFORMANCE_WEIGHT: 0.15, // 15% weight for individual guild performance within alliance (increased from 10%)
+  INDIVIDUAL_PERFORMANCE_WEIGHT: 0.05, // 5% weight for individual guild performance within alliance (reduced from 15%)
   FRIEND_DETECTION_THRESHOLD: 0.1, // 10% of total kills to consider as friend
   MIN_BATTLE_SIZE: 25, // Minimum players for MMR calculation
   MIN_BATTLE_FAME: 2000000, // Minimum fame for MMR calculation (2M)
   SEASON_CARRYOVER_RATIO: 0.3, // 30% of previous season MMR carries over
-  // Dynamic participation thresholds (relative to battle totals)
-  MIN_FAME_PARTICIPATION_RATIO: 0.005, // 0.5% of total battle fame for participation
-  MIN_KILLS_DEATHS_RATIO: 0.01, // 1% of total battle kills+deaths for participation
-  MIN_PLAYER_RATIO: 0.01, // 1% of total battle players for participation
+  
+  // IMPROVED: Much stricter participation thresholds to filter out minimal participants
+  MIN_FAME_PARTICIPATION_RATIO: 0.10, // 10% of total battle fame for participation (increased from 2%)
+  MIN_KILLS_DEATHS_RATIO: 0.10, // 10% of total battle kills+deaths for participation (increased from 3%)
+  MIN_PLAYER_RATIO: 0.10, // 10% of total battle players for participation (increased from 3%)
+  
+  // IMPROVED: Higher absolute thresholds for minimum participation
+  MIN_ABSOLUTE_FAME_PARTICIPATION: 500000, // Minimum 500K fame gained or lost (increased from 200K)
+  MIN_ABSOLUTE_KILLS_DEATHS: 5, // Minimum 5 kills OR deaths combined (increased from 2)
+  MIN_ABSOLUTE_PLAYERS: 3, // Minimum 3 players for significant participation (increased from 2)
+  
   // Alliance participation bonus (guilds from same alliance get more lenient thresholds)
-  ALLIANCE_PARTICIPATION_BONUS: 0.5, // 50% bonus for participating in major alliances
+  ALLIANCE_PARTICIPATION_BONUS: 0.3, // 30% bonus for participating in major alliances (reduced from 50%)
+  
+  // IMPROVED: Player count scaling for proportional MMR calculation
+  PLAYER_COUNT_SCALING_FACTOR: 0.8, // MMR changes scale with player count to the power of 0.8
+  MIN_PLAYER_COUNT_FOR_FULL_MMR: 8, // Guilds with 8+ players get full MMR changes
+  MAX_PLAYER_COUNT_FOR_SCALING: 20, // Guilds with 20+ players get capped scaling
+  
   // New constants for improved calculation
   PLAYER_COUNT_PENALTY_THRESHOLD: 1.5, // 50% more players triggers penalty
   PLAYER_COUNT_BONUS_THRESHOLD: 0.7, // 30% fewer players triggers bonus
@@ -177,12 +190,15 @@ export class MmrService {
       );
       totalMmrChange += individualPerformanceFactor * MMR_CONSTANTS.INDIVIDUAL_PERFORMANCE_WEIGHT;
 
+      // IMPROVED: Apply proportional scaling based on player count
+      const playerCountScalingFactor = this.calculatePlayerCountScalingFactor(guildStat);
+      
       // Apply K-factor and ensure reasonable bounds
       let finalMmrChange = Math.max(
         -MMR_CONSTANTS.K_FACTOR,
         Math.min(
           MMR_CONSTANTS.K_FACTOR,
-          totalMmrChange * MMR_CONSTANTS.K_FACTOR
+          totalMmrChange * MMR_CONSTANTS.K_FACTOR * playerCountScalingFactor
         )
       );
 
@@ -233,6 +249,7 @@ export class MmrService {
         guildName: guildStat.guildName,
         totalMmrChange: finalMmrChange,
         antiFarmingFactor,
+        playerCountScalingFactor,
         factors: {
           winLoss: winLossFactor,
           fame: fameFactor,
@@ -473,6 +490,34 @@ export class MmrService {
   }
 
   /**
+   * Calculate player count scaling factor for proportional MMR calculation
+   * This ensures that guilds with fewer players get proportionally less MMR changes
+   */
+  private calculatePlayerCountScalingFactor(guildStat: GuildBattleStats): number {
+    const playerCount = guildStat.players;
+    
+    // Guilds with minimum player count or more get full scaling
+    if (playerCount >= MMR_CONSTANTS.MIN_PLAYER_COUNT_FOR_FULL_MMR) {
+      return 1.0;
+    }
+    
+    // Guilds with very few players get heavily reduced scaling
+    if (playerCount <= 1) {
+      return 0.1; // 10% of normal MMR change for single players
+    }
+    
+    // Calculate scaling using power function for smooth transition
+    // This creates a curve where small guilds get proportionally less MMR
+    const scalingFactor = Math.pow(
+      playerCount / MMR_CONSTANTS.MIN_PLAYER_COUNT_FOR_FULL_MMR,
+      MMR_CONSTANTS.PLAYER_COUNT_SCALING_FACTOR
+    );
+    
+    // Ensure minimum scaling for very small guilds
+    return Math.max(0.1, Math.min(1.0, scalingFactor));
+  }
+
+  /**
    * Calculate individual performance factor (-1 to 1)
    * This factor rewards guilds that contribute significantly to their alliance's success
    * and penalizes guilds that contribute little despite being in a winning alliance
@@ -518,16 +563,18 @@ export class MmrService {
     // Calculate performance score (positive for good performance, negative for poor)
     let performanceScore = 0;
 
-    // Kill contribution (positive impact) - More aggressive weighting
+    // IMPROVED: More balanced performance calculation that doesn't heavily penalize smaller guilds
     if (playerContribution > 0) {
       const expectedKillRatio = playerContribution;
       const actualKillRatio = killContribution;
-      const killPerformance = (actualKillRatio - expectedKillRatio) * 3; // Increased weight
+      
+      // Reduced weight and more balanced calculation
+      const killPerformance = (actualKillRatio - expectedKillRatio) * 1.0; // Reduced from 3.0
       performanceScore += killPerformance;
       
-      // Extra penalty for very low kill contribution (less than 50% of expected)
-      if (actualKillRatio < expectedKillRatio * 0.5) {
-        performanceScore -= 0.5; // Additional penalty for poor performance
+      // Only apply severe penalties for very poor performance (less than 30% of expected)
+      if (actualKillRatio < expectedKillRatio * 0.3) {
+        performanceScore -= 0.2; // Reduced penalty
       }
     }
 
@@ -535,28 +582,30 @@ export class MmrService {
     if (playerContribution > 0) {
       const expectedDeathRatio = playerContribution;
       const actualDeathRatio = deathContribution;
-      const deathPerformance = (actualDeathRatio - expectedDeathRatio) * 2; // Increased weight
+      
+      // Reduced weight for death performance
+      const deathPerformance = (actualDeathRatio - expectedDeathRatio) * 0.8; // Reduced from 2.0
       performanceScore -= deathPerformance;
       
-      // Extra penalty for very high death contribution (more than 150% of expected)
-      if (actualDeathRatio > expectedDeathRatio * 1.5) {
-        performanceScore -= 0.3; // Additional penalty for poor performance
+      // Only apply penalties for very high death contribution (more than 200% of expected)
+      if (actualDeathRatio > expectedDeathRatio * 2.0) {
+        performanceScore -= 0.1; // Reduced penalty
       }
     }
 
-    // Fame efficiency (positive impact)
+    // Fame efficiency (positive impact) - Reduced weight
     if (playerContribution > 0) {
       const expectedFameRatio = playerContribution;
       const actualFameRatio = fameGainedContribution;
-      const famePerformance = (actualFameRatio - expectedFameRatio) * 1.5; // Increased weight
+      const famePerformance = (actualFameRatio - expectedFameRatio) * 0.5; // Reduced from 1.5
       performanceScore += famePerformance;
     }
 
-    // Fame loss efficiency (negative impact)
+    // Fame loss efficiency (negative impact) - Reduced weight
     if (playerContribution > 0) {
       const expectedFameLossRatio = playerContribution;
       const actualFameLossRatio = fameLostContribution;
-      const fameLossPerformance = (actualFameLossRatio - expectedFameLossRatio) * 1.5; // Increased weight
+      const fameLossPerformance = (actualFameLossRatio - expectedFameLossRatio) * 0.5; // Reduced from 1.5
       performanceScore -= fameLossPerformance;
     }
 
@@ -1339,7 +1388,7 @@ export class MmrService {
 
   /**
    * Check if a guild has significant participation in a battle
-   * Uses dynamic thresholds relative to total battle statistics
+   * Uses improved thresholds with both relative and absolute minimums
    */
   static hasSignificantParticipation(
     guildStat: GuildBattleStats,
@@ -1387,21 +1436,52 @@ export class MmrService {
     const adjustedPlayerThreshold =
       MMR_CONSTANTS.MIN_PLAYER_RATIO * (1 - allianceBonus);
 
-    // Check participation criteria
-    const hasFameParticipation = fameRatio >= adjustedFameThreshold;
-    const hasKillsDeathsParticipation =
-      killsDeathsRatio >= adjustedKillsDeathsThreshold;
-    const hasPlayerParticipation = playerRatio >= adjustedPlayerThreshold;
+    // IMPROVED: Check both relative and absolute participation criteria
+    const hasFameParticipation = fameRatio >= adjustedFameThreshold || 
+                                guildFameParticipation >= MMR_CONSTANTS.MIN_ABSOLUTE_FAME_PARTICIPATION;
+    const hasKillsDeathsParticipation = killsDeathsRatio >= adjustedKillsDeathsThreshold || 
+                                       guildKillsDeaths >= MMR_CONSTANTS.MIN_ABSOLUTE_KILLS_DEATHS;
+    const hasPlayerParticipation = playerRatio >= adjustedPlayerThreshold || 
+                                  guildStat.players >= MMR_CONSTANTS.MIN_ABSOLUTE_PLAYERS;
 
-    // Guild must meet at least 2 out of 3 criteria, or be from a major alliance
+    // IMPROVED: Much stricter criteria for single-player guilds
+    // Single players must have very high participation to be included
+    const isSinglePlayer = guildStat.players <= 1;
+    const hasSignificantKillsDeaths = guildKillsDeaths >= 8; // At least 8 kills OR deaths for single players (increased from 3)
+    const hasSignificantFame = guildFameParticipation >= 1000000; // At least 1M fame for single players (increased from 500K)
+    
+    // IMPROVED: Guild must meet at least 2 out of 3 criteria, or be from a major alliance
+    // Additionally, must have at least some meaningful participation (kills OR deaths)
+    const hasAnyKillsOrDeaths = guildStat.kills > 0 || guildStat.deaths > 0;
+    
+    // For single players, require higher thresholds
+    if (isSinglePlayer) {
+      const hasSignificantParticipationForSinglePlayer = 
+        hasAnyKillsOrDeaths && 
+        hasSignificantKillsDeaths && 
+        hasSignificantFame;
+      
+      // Even for major alliances, single players must meet strict criteria
+      return hasSignificantParticipationForSinglePlayer;
+    }
+    
     const participationScore = [
       hasFameParticipation,
       hasKillsDeathsParticipation,
       hasPlayerParticipation,
     ].filter(Boolean).length;
 
+    // For small guilds (2-3 players), require stricter criteria even with alliance bonus
+    const isSmallGuild = guildStat.players <= 3;
+    const hasSignificantParticipationForSmallGuild = 
+      participationScore >= 2 && hasAnyKillsOrDeaths && guildKillsDeaths >= 3;
+
+    if (isSmallGuild) {
+      return hasSignificantParticipationForSmallGuild;
+    }
+
     const hasSignificantParticipation =
-      participationScore >= 2 || isFromMajorAlliance;
+      (participationScore >= 2 && hasAnyKillsOrDeaths) || isFromMajorAlliance;
 
     // Log detailed participation analysis (debug level to reduce Railway rate limiting)
     logger.debug('Guild participation analysis', {
