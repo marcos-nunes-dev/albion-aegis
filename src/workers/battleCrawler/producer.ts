@@ -7,12 +7,182 @@ import type { BattleListItem, BattleDetail } from '../../types/albion.js';
 import { battleLogger } from '../../log.js';
 import { metrics } from '../../metrics.js';
 import { BattleNotifierProducer } from '../battleNotifier/producer.js';
+import redis from '../../queue/connection.js';
+
+// Distributed lock for battle crawling
+const CRAWL_LOCK_KEY = 'battle-crawl-lock';
+const CRAWL_LOCK_TTL = 300; // 5 minutes
+
+/**
+ * Acquire a distributed lock for battle crawling
+ */
+async function acquireCrawlLock(): Promise<boolean> {
+  try {
+    const lockValue = `crawl-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+    const result = await redis.set(CRAWL_LOCK_KEY, lockValue, 'EX', CRAWL_LOCK_TTL, 'NX');
+    return result === 'OK';
+  } catch (error) {
+    battleLogger.error('Failed to acquire crawl lock', { error: error instanceof Error ? error.message : 'Unknown error' });
+    return false;
+  }
+}
+
+/**
+ * Release the distributed lock for battle crawling
+ */
+async function releaseCrawlLock(): Promise<void> {
+  try {
+    await redis.del(CRAWL_LOCK_KEY);
+  } catch (error) {
+    battleLogger.error('Failed to release crawl lock', { error: error instanceof Error ? error.message : 'Unknown error' });
+  }
+}
+
+/**
+ * Upsert a battle to the database with complete data from API
+ */
+async function upsertBattle(battle: BattleListItem) {
+  return await executeWithRetry(async () => {
+    const prisma = getPrisma();
+    const existingBattle = await prisma.battle.findUnique({
+      where: { albionId: battle.albionId }
+    });
+    
+    // Fetch complete battle data from API to get full guild/alliance information
+    let completeBattleData: BattleDetail | null = null;
+    try {
+      battleLogger.debug('Fetching complete battle data from API', {
+        albionId: battle.albionId.toString()
+      });
+      completeBattleData = await getBattleDetail(battle.albionId);
+    } catch (error) {
+      battleLogger.warn('Failed to fetch complete battle data, using list data', {
+        albionId: battle.albionId.toString(),
+        error: error instanceof Error ? error.message : 'Unknown error'
+      });
+    }
+    
+    // Use complete data if available, otherwise fall back to list data
+    const alliancesData = completeBattleData?.alliances || battle.alliances;
+    const guildsData = completeBattleData?.guilds || battle.guilds;
+    
+    const battleData = {
+      albionId: battle.albionId,
+      startedAt: new Date(battle.startedAt),
+      totalFame: battle.totalFame,
+      totalKills: battle.totalKills,
+      totalPlayers: battle.totalPlayers,
+      alliancesJson: alliancesData,
+      guildsJson: guildsData,
+      ingestedAt: new Date(),
+    };
+    
+    if (existingBattle) {
+      // Update existing battle
+      const updatedBattle = await prisma.battle.update({
+        where: { albionId: battle.albionId },
+        data: battleData
+      });
+      
+      battleLogger.debug('Updated existing battle with complete data', {
+        albionId: battle.albionId.toString(),
+        hasCompleteData: !!completeBattleData,
+        guildCount: guildsData.length,
+        allianceCount: alliancesData.length
+      });
+      
+      return { battle: updatedBattle, wasCreated: false };
+    } else {
+      // Create new battle
+      const newBattle = await prisma.battle.create({
+        data: battleData
+      });
+      
+      // Record metrics for new battle
+      metrics.recordBattleUpsert();
+      
+      battleLogger.info('Created new battle with complete data', {
+        albionId: battle.albionId.toString(),
+        hasCompleteData: !!completeBattleData,
+        guildCount: guildsData.length,
+        allianceCount: alliancesData.length,
+        totalPlayers: battle.totalPlayers
+      });
+      
+      return { battle: newBattle, wasCreated: true };
+    }
+  });
+}
+
+/**
+ * Determine if we should enqueue a kills fetch job for this battle
+ * Implements improved logic for kill job enqueuing
+ */
+function shouldEnqueueKills(battle: BattleListItem, dbBattle: any): boolean {
+  const now = new Date();
+  const battleStartTime = new Date(battle.startedAt);
+  
+  // If kills were never fetched, enqueue
+  if (dbBattle.killsFetchedAt == null) {
+    return true;
+  }
+  
+  // If battle is old enough to be considered complete, skip
+  const recheckHoursMs = config.RECHECK_DONE_BATTLE_HOURS * 60 * 60 * 1000;
+  if (now.getTime() - battleStartTime.getTime() >= recheckHoursMs) {
+    return false; // Consider complete; skip
+  }
+  
+  // If kills were fetched recently, allow light recheck for ongoing fights
+  const debounceMinutesMs = config.DEBOUNCE_KILLS_MIN * 60 * 1000;
+  if (now.getTime() - dbBattle.killsFetchedAt.getTime() >= debounceMinutesMs) {
+    return true; // Allow light recheck for ongoing fights
+  }
+  
+  // Otherwise, skip (kills fetched too recently)
+  return false;
+}
+
+/**
+ * Enqueue a kills fetch job with idempotent behavior
+ */
+async function enqueueKillsJob(albionId: bigint): Promise<void> {
+  try {
+         await killsFetchQueue.add(
+       'fetch-kills',
+       { albionId: albionId.toString() },
+       {
+         jobId: `battle-${albionId}`,
+         removeOnComplete: 10000,
+         removeOnFail: 10000,
+         attempts: 5,
+         backoff: {
+           type: 'exponential',
+           delay: 5000,
+         },
+       }
+     );
+     } catch (error) {
+     // Job might already exist (idempotent), log but don't throw
+     battleLogger.warn('Could not enqueue kills job', { 
+       albionId: albionId.toString(), 
+       error: error instanceof Error ? error.message : 'Unknown error' 
+     });
+   }
+}
 
 /**
  * Run battle crawl with sliding time window to avoid missing late-listed battles
  * Uses soft cutoff instead of watermark to ensure comprehensive coverage
  */
 export async function runBattleCrawl(): Promise<void> {
+  // Try to acquire the crawl lock
+  const lockAcquired = await acquireCrawlLock();
+  if (!lockAcquired) {
+    battleLogger.info('Another battle crawl is already running, skipping this execution');
+    return;
+  }
+
   battleLogger.info('Starting battle crawl');
   
   const startTime = Date.now();
@@ -151,138 +321,7 @@ export async function runBattleCrawl(): Promise<void> {
    } finally {
      // Clean up battle notifier producer
      await battleNotifierProducer.close();
-   }
-}
-
-/**
- * Upsert a battle to the database with complete data from API
- */
-async function upsertBattle(battle: BattleListItem) {
-  return await executeWithRetry(async () => {
-    const prisma = getPrisma();
-    const existingBattle = await prisma.battle.findUnique({
-      where: { albionId: battle.albionId }
-    });
-    
-    // Fetch complete battle data from API to get full guild/alliance information
-    let completeBattleData: BattleDetail | null = null;
-    try {
-      battleLogger.debug('Fetching complete battle data from API', {
-        albionId: battle.albionId.toString()
-      });
-      completeBattleData = await getBattleDetail(battle.albionId);
-    } catch (error) {
-      battleLogger.warn('Failed to fetch complete battle data, using list data', {
-        albionId: battle.albionId.toString(),
-        error: error instanceof Error ? error.message : 'Unknown error'
-      });
-    }
-    
-    // Use complete data if available, otherwise fall back to list data
-    const alliancesData = completeBattleData?.alliances || battle.alliances;
-    const guildsData = completeBattleData?.guilds || battle.guilds;
-    
-    const battleData = {
-      albionId: battle.albionId,
-      startedAt: new Date(battle.startedAt),
-      totalFame: battle.totalFame,
-      totalKills: battle.totalKills,
-      totalPlayers: battle.totalPlayers,
-      alliancesJson: alliancesData,
-      guildsJson: guildsData,
-      ingestedAt: new Date(),
-    };
-    
-    if (existingBattle) {
-      // Update existing battle
-      const updatedBattle = await prisma.battle.update({
-        where: { albionId: battle.albionId },
-        data: battleData
-      });
-      
-      battleLogger.debug('Updated existing battle with complete data', {
-        albionId: battle.albionId.toString(),
-        hasCompleteData: !!completeBattleData,
-        guildCount: guildsData.length,
-        allianceCount: alliancesData.length
-      });
-      
-      return { battle: updatedBattle, wasCreated: false };
-    } else {
-      // Create new battle
-      const newBattle = await prisma.battle.create({
-        data: battleData
-      });
-      
-      // Record metrics for new battle
-      metrics.recordBattleUpsert();
-      
-      battleLogger.info('Created new battle with complete data', {
-        albionId: battle.albionId.toString(),
-        hasCompleteData: !!completeBattleData,
-        guildCount: guildsData.length,
-        allianceCount: alliancesData.length,
-        totalPlayers: battle.totalPlayers
-      });
-      
-      return { battle: newBattle, wasCreated: true };
-    }
-  });
-}
-
-/**
- * Determine if we should enqueue a kills fetch job for this battle
- * Implements improved logic for kill job enqueuing
- */
-function shouldEnqueueKills(battle: BattleListItem, dbBattle: any): boolean {
-  const now = new Date();
-  const battleStartTime = new Date(battle.startedAt);
-  
-  // If kills were never fetched, enqueue
-  if (dbBattle.killsFetchedAt == null) {
-    return true;
-  }
-  
-  // If battle is old enough to be considered complete, skip
-  const recheckHoursMs = config.RECHECK_DONE_BATTLE_HOURS * 60 * 60 * 1000;
-  if (now.getTime() - battleStartTime.getTime() >= recheckHoursMs) {
-    return false; // Consider complete; skip
-  }
-  
-  // If kills were fetched recently, allow light recheck for ongoing fights
-  const debounceMinutesMs = config.DEBOUNCE_KILLS_MIN * 60 * 1000;
-  if (now.getTime() - dbBattle.killsFetchedAt.getTime() >= debounceMinutesMs) {
-    return true; // Allow light recheck for ongoing fights
-  }
-  
-  // Otherwise, skip (kills fetched too recently)
-  return false;
-}
-
-/**
- * Enqueue a kills fetch job with idempotent behavior
- */
-async function enqueueKillsJob(albionId: bigint): Promise<void> {
-  try {
-         await killsFetchQueue.add(
-       'fetch-kills',
-       { albionId: albionId.toString() },
-       {
-         jobId: `battle-${albionId}`,
-         removeOnComplete: 10000,
-         removeOnFail: 10000,
-         attempts: 5,
-         backoff: {
-           type: 'exponential',
-           delay: 5000,
-         },
-       }
-     );
-     } catch (error) {
-     // Job might already exist (idempotent), log but don't throw
-     battleLogger.warn('Could not enqueue kills job', { 
-       albionId: albionId.toString(), 
-       error: error instanceof Error ? error.message : 'Unknown error' 
-     });
+     // Release the crawl lock
+     await releaseCrawlLock();
    }
 }
