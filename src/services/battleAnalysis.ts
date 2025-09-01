@@ -39,19 +39,27 @@ export class BattleAnalysisService {
       if (!season) {
         logger.warn('No active season found for battle date', {
           battleId: battleId.toString(),
-          battleDate
+          battleDate: battleDate.toISOString()
         });
         return null;
       }
+      
+      logger.debug('Found active season for battle', {
+        battleId: battleId.toString(),
+        seasonId: season.id,
+        seasonName: season.name
+      });
 
       // Check if battle meets MMR criteria
       const meetsCriteria = this.meetsMmrCriteria(totalPlayers, totalFame);
       
       if (!meetsCriteria) {
-        logger.debug('Battle does not meet MMR criteria', {
+        logger.warn('Battle does not meet MMR criteria', {
           battleId: battleId.toString(),
           totalPlayers,
-          totalFame
+          totalFame,
+          minPlayersRequired: 25,
+          minFameRequired: 2000000
         });
         return null;
       }
@@ -82,9 +90,11 @@ export class BattleAnalysisService {
 
       // Check if we have enough guilds for meaningful MMR calculation
       if (significantGuildStats.length < 2) {
-        logger.debug('Not enough guilds for MMR calculation', {
+        logger.warn('Not enough guilds for MMR calculation', {
           battleId: battleId.toString(),
-          guildCount: significantGuildStats.length
+          totalGuilds: guildStats.length,
+          significantGuilds: significantGuildStats.length,
+          minRequired: 2
         });
         return null;
       }
