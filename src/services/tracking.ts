@@ -271,6 +271,31 @@ export class TrackingService {
   }
 
   /**
+   * Check if a battle has already been processed for a subscription
+   */
+  async hasBattleBeenProcessed(subscriptionId: string, battleId: bigint): Promise<boolean> {
+    try {
+      const existingResult = await this.prisma.battleResult.findFirst({
+        where: {
+          subscriptionId,
+          battleAlbionId: battleId
+        }
+      });
+
+      return !!existingResult;
+    } catch (error) {
+      logger.error({
+        message: 'Failed to check if battle has been processed',
+        error: error instanceof Error ? error.message : String(error),
+        subscriptionId,
+        battleId: battleId.toString()
+      });
+      // If we can't check, assume it hasn't been processed to avoid missing notifications
+      return false;
+    }
+  }
+
+  /**
    * Record battle result and update counter
    */
   async recordBattleResult(
@@ -280,6 +305,17 @@ export class TrackingService {
     guildStats: GuildBattleStats
   ): Promise<void> {
     try {
+      // Check if this battle has already been processed for this subscription
+      const alreadyProcessed = await this.hasBattleBeenProcessed(subscriptionId, battleId);
+      if (alreadyProcessed) {
+        logger.info({
+          message: 'Battle already processed for subscription, skipping',
+          subscriptionId,
+          battleId: battleId.toString()
+        });
+        return;
+      }
+
       // Create battle result record
       await this.prisma.battleResult.create({
         data: {
@@ -318,6 +354,16 @@ export class TrackingService {
         deaths: guildStats.deaths
       });
     } catch (error) {
+      // Check if this is a duplicate key error (unique constraint violation)
+      if (error instanceof Error && error.message.includes('subscription_battle_unique')) {
+        logger.info({
+          message: 'Battle already processed for subscription (database constraint)',
+          subscriptionId,
+          battleId: battleId.toString()
+        });
+        return;
+      }
+
       logger.error({
         message: 'Failed to record battle result',
         error: error instanceof Error ? error.message : String(error),

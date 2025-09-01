@@ -15,13 +15,17 @@ export class BattleNotifierProducer {
   }
 
   /**
-   * Enqueue a battle for notification processing
+   * Enqueue a battle for notification processing with idempotency
    */
   async enqueueBattleNotification(battleId: bigint): Promise<void> {
     try {
+      // Use a unique job ID to prevent duplicate jobs for the same battle
+      const jobId = `battle-notification-${battleId}`;
+      
       const job = await this.queue.add('process-battle-notification', {
         battleId: battleId.toString()
       }, {
+        jobId: jobId, // This ensures only one job per battle
         removeOnComplete: 100, // Keep last 100 completed jobs
         removeOnFail: 50,      // Keep last 50 failed jobs
         attempts: 3,           // Retry up to 3 times
@@ -38,6 +42,15 @@ export class BattleNotifierProducer {
       });
 
     } catch (error) {
+      // If this is a duplicate job error, log it but don't throw
+      if (error instanceof Error && error.message.includes('Job already exists')) {
+        logger.debug({
+          message: 'Battle notification job already exists, skipping',
+          battleId: battleId.toString()
+        });
+        return;
+      }
+
       logger.error({
         message: 'Failed to enqueue battle notification job',
         error: error instanceof Error ? error.message : String(error),

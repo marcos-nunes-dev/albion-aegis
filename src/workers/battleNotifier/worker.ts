@@ -14,6 +14,7 @@ export interface BattleNotificationJob {
 
 export class BattleNotifierWorker {
   private trackingService: TrackingService;
+  private processedBattles: Set<string> = new Set(); // Simple cache to prevent duplicate processing
 
   constructor(prisma: PrismaClient) {
     this.trackingService = new TrackingService(prisma);
@@ -33,6 +34,16 @@ export class BattleNotifierWorker {
     });
 
     try {
+      // Check if we've already processed this battle recently (simple cache)
+      if (this.processedBattles.has(battleId)) {
+        logger.info({
+          message: 'Battle already processed recently, skipping',
+          battleId: battleId,
+          jobId: job.id
+        });
+        return;
+      }
+
       // Get battle details
       const battleDetail = await getBattleDetail(battleIdBigInt);
       if (!battleDetail) {
@@ -61,6 +72,12 @@ export class BattleNotifierWorker {
 
       await Promise.allSettled(notificationPromises);
 
+      // Add to processed cache (keep for 5 minutes to prevent immediate reprocessing)
+      this.processedBattles.add(battleId);
+      setTimeout(() => {
+        this.processedBattles.delete(battleId);
+      }, 5 * 60 * 1000); // 5 minutes
+
       logger.info({
         message: 'Battle notification processing completed',
         battleId: battleId,
@@ -86,6 +103,22 @@ export class BattleNotifierWorker {
     subscription: any
   ): Promise<void> {
     try {
+      // Check if this battle has already been processed for this subscription
+      const alreadyProcessed = await this.trackingService.hasBattleBeenProcessed(
+        subscription.id, 
+        battleDetail.albionId
+      );
+      
+      if (alreadyProcessed) {
+        logger.info({
+          message: 'Battle already processed for subscription, skipping notification',
+          subscriptionId: subscription.id,
+          entityName: subscription.entityName,
+          battleId: battleDetail.albionId.toString()
+        });
+        return;
+      }
+
       // Check if battle meets criteria
       if (!this.trackingService.checkBattleCriteria(battleDetail, subscription)) {
         logger.debug({

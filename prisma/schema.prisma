@@ -138,6 +138,7 @@ model BattleResult {
   @@index([counterHistoryId])
   @@index([battleAlbionId])
   @@index([processedAt])
+  @@unique([subscriptionId, battleAlbionId], name: "subscription_battle_unique")
 }
 
 // MMR System Models
