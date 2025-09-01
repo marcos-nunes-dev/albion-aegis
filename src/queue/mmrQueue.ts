@@ -106,6 +106,8 @@ export async function addMmrCalculationJob(
       friendGroups: battleAnalysis.friendGroups
     };
 
+
+
     // Add job to queue
     const job = await mmrCalculationQueue.add(
       JOB_TYPES.CALCULATE_BATTLE_MMR,
@@ -193,6 +195,8 @@ async function processMmrCalculationJob(job: Job<MmrCalculationJobData>): Promis
       battleId: battleId.toString(),
       guildCount: guildStats.length
     });
+
+
 
     // Update job status to processing
     console.log(`🏆 [MMR-QUEUE] Updating job status to PROCESSING for battle ${battleId}`);

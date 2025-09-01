@@ -339,7 +339,7 @@ model MmrCalculationLog {
   guild                 Guild    @relation(fields: [guildId], references: [id], onDelete: Cascade)
   mmrCalculationJob     MmrCalculationJob? @relation(fields: [battleId, seasonId], references: [battleId, seasonId], onDelete: Cascade)
 
-  @@unique([battleId, seasonId, guildId])
+  @@unique([battleId, seasonId, guildId], name: "battleId_seasonId_guildId")
   @@index([battleId])
   @@index([seasonId])
   @@index([guildId])

@@ -1119,19 +1119,20 @@ export class MmrService {
         MmrService.hasSignificantParticipation(battleStats, battleAnalysis);
 
       // Create MMR calculation log entry
-      await this.prisma.mmrCalculationLog.create({
-        data: {
-          battleId: battleAnalysis.battleId,
-          seasonId,
-          guildId,
+      await this.prisma.mmrCalculationLog.upsert({
+        where: {
+          battleId_seasonId_guildId: {
+            battleId: battleAnalysis.battleId,
+            seasonId,
+            guildId
+          }
+        },
+        update: {
+          // Update with latest values
           guildName: battleStats.guildName,
-
-          // MMR values
           previousMmr,
           mmrChange,
           newMmr,
-
-          // Battle statistics
           kills: battleStats.kills,
           deaths: battleStats.deaths,
           fameGained: BigInt(battleStats.fameGained),
@@ -1139,14 +1140,10 @@ export class MmrService {
           players: battleStats.players,
           avgIP: battleStats.avgIP,
           isPrimeTime: battleStats.isPrimeTime,
-
-          // Battle context
           totalBattlePlayers: battleAnalysis.totalPlayers,
           totalBattleFame: BigInt(battleAnalysis.totalFame),
           battleDuration: battleAnalysis.battleDuration,
           killClustering: battleStats.killClustering,
-
-          // MMR calculation factors
           winLossFactor,
           fameFactor,
           playerCountFactor,
@@ -1156,8 +1153,6 @@ export class MmrService {
           durationFactor,
           clusteringFactor,
           opponentStrengthFactor,
-
-          // Weighted contributions
           winLossContribution,
           fameContribution,
           playerCountContribution,
@@ -1167,25 +1162,66 @@ export class MmrService {
           durationContribution,
           clusteringContribution,
           opponentStrengthContribution,
-
-          // Final calculation
           totalWeightedScore,
           kFactorApplied: MMR_CONSTANTS.K_FACTOR,
-
-          // Additional context
           isWin,
           hasSignificantParticipation,
           allianceName,
           opponentGuilds,
           opponentMmrs,
-
-          // Anti-farming tracking
           antiFarmingFactor: antiFarmingFactor ?? null,
           originalMmrChange: antiFarmingFactor !== undefined && antiFarmingFactor < 1.0 ? mmrChange / antiFarmingFactor : null,
-
-          // Metadata
           calculationVersion: "1.0",
+          processedAt: new Date()
         },
+        create: {
+          battleId: battleAnalysis.battleId,
+          seasonId,
+          guildId,
+          guildName: battleStats.guildName,
+          previousMmr,
+          mmrChange,
+          newMmr,
+          kills: battleStats.kills,
+          deaths: battleStats.deaths,
+          fameGained: BigInt(battleStats.fameGained),
+          fameLost: BigInt(battleStats.fameLost),
+          players: battleStats.players,
+          avgIP: battleStats.avgIP,
+          isPrimeTime: battleStats.isPrimeTime,
+          totalBattlePlayers: battleAnalysis.totalPlayers,
+          totalBattleFame: BigInt(battleAnalysis.totalFame),
+          battleDuration: battleAnalysis.battleDuration,
+          killClustering: battleStats.killClustering,
+          winLossFactor,
+          fameFactor,
+          playerCountFactor,
+          ipFactor,
+          battleSizeFactor,
+          kdFactor,
+          durationFactor,
+          clusteringFactor,
+          opponentStrengthFactor,
+          winLossContribution,
+          fameContribution,
+          playerCountContribution,
+          ipContribution,
+          battleSizeContribution,
+          kdContribution,
+          durationContribution,
+          clusteringContribution,
+          opponentStrengthContribution,
+          totalWeightedScore,
+          kFactorApplied: MMR_CONSTANTS.K_FACTOR,
+          isWin,
+          hasSignificantParticipation,
+          allianceName,
+          opponentGuilds,
+          opponentMmrs,
+          antiFarmingFactor: antiFarmingFactor ?? null,
+          originalMmrChange: antiFarmingFactor !== undefined && antiFarmingFactor < 1.0 ? mmrChange / antiFarmingFactor : null,
+          calculationVersion: "1.0"
+        }
       });
 
       logger.debug("Logged MMR calculation details", {
