@@ -169,7 +169,7 @@ async function makeRequest(url: string, attempt: number = 1): Promise<any> {
     // Handle successful responses
     if (statusCode >= 200 && statusCode < 300) {
       const body = await response.body.json();
-      httpLogger.info('Request successful', { statusCode, url });
+      httpLogger.debug(`HTTP request successful (${statusCode}): ${url}`);
       metrics.recordRequest('api', statusCode);
       rateLimitTracker.recordRequest(false); // Not rate limited
       recordSuccess(); // Record successful request
@@ -263,7 +263,7 @@ async function rateLimitedRequest(url: string): Promise<any> {
 export async function getBattlesPage(page: number, minPlayers: number): Promise<BattleListResponse> {
   const url = `${config.API_BASE_URL}/battles?offset=${page}&limit=51&sort=recent&minPlayers=${minPlayers}`;
   
-  httpLogger.info('Fetching battles page', { page, minPlayers });
+  httpLogger.info(`Fetching battles page ${page + 1} (min players: ${minPlayers})`);
   
   try {
     const data = await rateLimitedRequest(url);
@@ -274,7 +274,7 @@ export async function getBattlesPage(page: number, minPlayers: number): Promise<
       throw new ValidationError('Invalid battle list response format');
     }
     
-    httpLogger.info('Successfully fetched battles', { page, count: battles.length });
+    httpLogger.info(`Successfully fetched ${battles.length} battles from page ${page + 1}`);
     return battles;
     
   } catch (error) {
@@ -298,7 +298,7 @@ export async function getBattlesPage(page: number, minPlayers: number): Promise<
 export async function getBattleDetail(albionId: bigint): Promise<BattleDetail> {
   const url = `${config.API_BASE_URL}/battles/${albionId.toString()}`;
   
-  httpLogger.info('Fetching battle details', { albionId: albionId.toString() });
+  httpLogger.info(`Fetching battle details for battle ${albionId.toString()}`);
   
   try {
     const data = await rateLimitedRequest(url);
@@ -309,10 +309,7 @@ export async function getBattleDetail(albionId: bigint): Promise<BattleDetail> {
       throw new ValidationError('Invalid battle detail response format');
     }
     
-    httpLogger.info('Successfully fetched battle details', { 
-      albionId: albionId.toString(), 
-      playerCount: battleDetail.players.length 
-    });
+    httpLogger.info(`Successfully fetched battle details for battle ${albionId.toString()} (${battleDetail.players.length} players)`);
     return battleDetail;
     
   } catch (error) {
@@ -342,7 +339,7 @@ export async function getBattleDetail(albionId: bigint): Promise<BattleDetail> {
 export async function getKillsForBattle(albionId: bigint): Promise<KillEventsResponse> {
   const url = `${config.API_BASE_URL}/battles/kills?ids=${albionId.toString()}`;
   
-  httpLogger.info('Fetching kill events', { albionId: albionId.toString() });
+  httpLogger.info(`Fetching kill events for battle ${albionId.toString()}`);
   
   try {
     const data = await rateLimitedRequest(url);
@@ -353,10 +350,7 @@ export async function getKillsForBattle(albionId: bigint): Promise<KillEventsRes
       throw new ValidationError('Invalid kill events response format');
     }
     
-    httpLogger.info('Successfully fetched kill events', { 
-      albionId: albionId.toString(), 
-      count: killEvents.length 
-    });
+    httpLogger.info(`Successfully fetched ${killEvents.length} kill events for battle ${albionId.toString()}`);
     return killEvents;
     
   } catch (error) {
@@ -386,7 +380,7 @@ export async function getKillsForBattle(albionId: bigint): Promise<KillEventsRes
 export async function searchGuilds(name: string): Promise<GuildSearchResponse> {
   const url = `${config.API_BASE_URL}/guilds/search?search=${encodeURIComponent(name)}`;
   
-  httpLogger.info('Searching for guilds', { name });
+  httpLogger.info(`Searching for guilds with name: ${name}`);
   
   try {
     const data = await rateLimitedRequest(url);
@@ -397,7 +391,7 @@ export async function searchGuilds(name: string): Promise<GuildSearchResponse> {
       throw new ValidationError('Invalid guild search response format');
     }
     
-    httpLogger.info('Successfully searched for guilds', { name, count: guildSearchResponse.length });
+    httpLogger.info(`Successfully found ${guildSearchResponse.length} guilds for search: ${name}`);
     return guildSearchResponse;
     
   } catch (error) {
