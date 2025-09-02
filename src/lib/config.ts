@@ -47,7 +47,7 @@ const configSchema = z.object({
   GAP_RECOVERY_LOOKBACK_HOURS: z.coerce.number().positive().default(6),
   GAP_RECOVERY_MAX_GAP_MINUTES: z.coerce.number().positive().default(30),
   GAP_RECOVERY_INTERVAL_CRAWLS: z.coerce.number().positive().default(10),
-  GAP_RECOVERY_PAGES_TO_CHECK: z.coerce.number().positive().default(5), // Number of API pages to check for missing battles
+  GAP_RECOVERY_PAGES_TO_CHECK: z.coerce.number().positive().default(20), // Number of API pages to check for missing battles
 
   // Database Pool Configuration
   DATABASE_POOL_MIN: z.coerce.number().positive().default(3), // Increased from 1 to 3

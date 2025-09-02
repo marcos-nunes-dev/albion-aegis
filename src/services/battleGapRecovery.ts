@@ -55,7 +55,7 @@ export class BattleGapRecoveryService {
     logger.info('Detecting missing battles from recent API results');
     
     let totalRecovered = 0;
-    const pagesToCheck = config.GAP_RECOVERY_PAGES_TO_CHECK || 5; // Default to checking 3 pages
+    const pagesToCheck = config.GAP_RECOVERY_PAGES_TO_CHECK || 5; // Default to checking 5 pages
     
     // Only process battles that are older than 10 minutes to avoid conflicts with main crawler
     const cutoffTime = new Date(Date.now() - (10 * 60 * 1000)); // 10 minutes ago
@@ -72,11 +72,41 @@ export class BattleGapRecoveryService {
           break;
         }
 
-        // Check each battle on this page
-        for (const battle of battles) {
+        // Filter battles that are old enough to process
+        const battlesToCheck = battles.filter(battle => {
+          const battleStartTime = new Date(battle.startedAt);
+          return battleStartTime <= cutoffTime;
+        });
+
+        if (battlesToCheck.length === 0) {
+          logger.debug('No battles old enough to process on this page', { page: page + 1 });
+          continue;
+        }
+
+        // Batch check for existing battles to reduce database queries
+        const battleIds = battlesToCheck.map(battle => battle.albionId);
+        logger.debug('Batch checking battles in database', {
+          page: page + 1,
+          battleCount: battleIds.length,
+          totalOnPage: battles.length
+        });
+
+        const existingBattles = await this.prisma.battle.findMany({
+          where: { 
+            albionId: { 
+              in: battleIds 
+            } 
+          },
+          select: { albionId: true }
+        });
+
+        const existingBattleIds = new Set(existingBattles.map(b => b.albionId));
+
+        // Check each battle that passed the cutoff time
+        for (const battle of battlesToCheck) {
           const battleStartTime = new Date(battle.startedAt);
           
-          // Skip battles that are too recent (likely being processed by main crawler)
+          // Double-check cutoff time (already filtered above, but for clarity)
           if (battleStartTime > cutoffTime) {
             logger.debug('Skipping recent battle in gap recovery', {
               albionId: battle.albionId.toString(),
@@ -86,13 +116,7 @@ export class BattleGapRecoveryService {
             continue;
           }
 
-          // Check if we already have this battle in our database
-          const existingBattle = await this.prisma.battle.findUnique({
-            where: { albionId: battle.albionId },
-            select: { albionId: true }
-          });
-
-          if (!existingBattle) {
+          if (!existingBattleIds.has(battle.albionId)) {
             // This is a missing battle! Recover it
             logger.info('Found missing battle on API', {
               albionId: battle.albionId.toString(),
@@ -112,7 +136,7 @@ export class BattleGapRecoveryService {
           }
         }
 
-        // If we found no missing battles on this page, continue to next page
+        // If we found no battles to check on this page, continue to next page
         // This ensures we catch battles that might have been added late to earlier pages
 
       } catch (error) {
