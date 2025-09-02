@@ -733,14 +733,12 @@ export class MmrService {
         antiFarmingFactor
       );
 
-      // Update prime time mass if this is a prime time battle
-      if (battleStats.isPrimeTime) {
-        await this.updatePrimeTimeMass(
-          guildSeason.id,
-          battleStats.players,
-          battleAnalysis.battleId
-        );
-      }
+      // Update prime time mass for eligible guilds (function will determine if it's actually prime time)
+      await this.updatePrimeTimeMass(
+        guildSeason.id,
+        battleStats.players,
+        battleAnalysis.battleId
+      );
 
       logger.info("Updated guild season MMR", {
         guildId,
@@ -830,8 +828,6 @@ export class MmrService {
         windowEnd: matchingWindow.endHour
       });
 
-      // TODO: Uncomment when Prisma client is regenerated with new GuildPrimeTimeMass model
-      /*
       // Get or create prime time mass record
       let primeTimeMass = await this.prisma.guildPrimeTimeMass.findUnique({
         where: { 
@@ -853,8 +849,15 @@ export class MmrService {
             lastBattleAt: battle.startedAt
           }
         });
+
+        logger.debug('Created new prime time mass record', {
+          guildSeasonId,
+          primeTimeWindowId: matchingWindow.id,
+          avgMass: playerCount,
+          battleCount: 1
+        });
       } else {
-        // Update existing record
+        // Update existing record with running average
         const newBattleCount = primeTimeMass.battleCount + 1;
         const newAvgMass = ((primeTimeMass.avgMass * primeTimeMass.battleCount) + playerCount) / newBattleCount;
 
@@ -866,14 +869,24 @@ export class MmrService {
             lastBattleAt: battle.startedAt
           }
         });
-      }
-      */
 
-      logger.debug("Updated prime time mass (placeholder)", {
+        logger.debug('Updated existing prime time mass record', {
+          guildSeasonId,
+          primeTimeWindowId: matchingWindow.id,
+          oldAvgMass: primeTimeMass.avgMass,
+          newAvgMass: newAvgMass,
+          oldBattleCount: primeTimeMass.battleCount,
+          newBattleCount: newBattleCount
+        });
+      }
+
+      logger.debug("Successfully updated prime time mass", {
         guildSeasonId,
-        primeTimeWindow: `${matchingWindow.startHour}-${matchingWindow.endHour}`,
+        primeTimeWindow: `${matchingWindow.startHour}:00-${matchingWindow.endHour}:00`,
         playerCount,
         battleId: battleId.toString(),
+        finalAvgMass: primeTimeMass.avgMass,
+        finalBattleCount: primeTimeMass.battleCount
       });
     } catch (error) {
       logger.error("Error updating prime time mass", {
@@ -890,16 +903,10 @@ export class MmrService {
    */
   async getGuildPrimeTimeMass(guildSeasonId: string): Promise<any[]> {
     try {
-      // TODO: Implement when Prisma client is regenerated
-      // return await this.prisma.guildPrimeTimeMass.findMany({
-      //   where: { guildSeasonId },
-      //   include: { primeTimeWindow: true }
-      // });
-
-      logger.info(
-        "Prime time mass data not yet implemented - requires Prisma client regeneration"
-      );
-      return [];
+      return await this.prisma.guildPrimeTimeMass.findMany({
+        where: { guildSeasonId },
+        include: { primeTimeWindow: true }
+      });
     } catch (error) {
       logger.error("Error getting guild prime time mass", {
         guildSeasonId,
