@@ -15,7 +15,6 @@ RUN \
 # Rebuild the source code only when needed
 FROM base AS builder
 WORKDIR /app
-COPY --from=deps /app/node_modules ./node_modules
 
 # Copy the entire project (Railway build context is root)
 COPY . .
