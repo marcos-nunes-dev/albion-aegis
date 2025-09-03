@@ -13,6 +13,9 @@ COPY . .
 WORKDIR /app/apps/api-bff
 RUN npm ci
 
+# Ensure Prisma client and CLI are available in this directory
+RUN npm install @prisma/client prisma
+
 # Generate Prisma client using the root schema
 RUN npx prisma generate --schema=../../prisma/schema.prisma
 
