@@ -6,21 +6,12 @@ FROM base AS deps
 RUN apk add --no-cache libc6-compat
 WORKDIR /app
 
-# Install dependencies based on the preferred package manager
-COPY apps/api-bff/package.json apps/api-bff/package-lock.json* ./
-RUN \
-  if [ -f package-lock.json ]; then npm ci; \
-  else echo "Lockfile not found." && exit 1; fi
-
-# Rebuild the source code only when needed
-FROM base AS builder
-WORKDIR /app
-
 # Copy the entire project (Railway build context is root)
 COPY . .
 
-# Copy BFF source to working directory
+# Install BFF dependencies
 WORKDIR /app/apps/api-bff
+RUN npm ci
 
 # Generate Prisma client using the root schema
 RUN npx prisma generate --schema=../../prisma/schema.prisma
@@ -38,10 +29,10 @@ RUN addgroup --system --gid 1001 nodejs
 RUN adduser --system --uid 1001 nextjs
 
 # Copy built application
-COPY --from=builder --chown=nextjs:nodejs /app/apps/api-bff/dist ./dist
-COPY --from=builder --chown=nextjs:nodejs /app/apps/api-bff/node_modules/.prisma ./node_modules/.prisma
-COPY --from=builder --chown=nextjs:nodejs /app/apps/api-bff/node_modules/@prisma ./node_modules/@prisma
-COPY --from=builder --chown=nextjs:nodejs /app/apps/api-bff/package.json ./package.json
+COPY --from=deps --chown=nextjs:nodejs /app/apps/api-bff/dist ./dist
+COPY --from=deps --chown=nextjs:nodejs /app/apps/api-bff/node_modules/.prisma ./node_modules/.prisma
+COPY --from=deps --chown=nextjs:nodejs /app/apps/api-bff/node_modules/@prisma ./node_modules/@prisma
+COPY --from=deps --chown=nextjs:nodejs /app/apps/api-bff/package.json ./package.json
 
 USER nextjs
 
