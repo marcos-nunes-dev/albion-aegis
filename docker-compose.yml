@@ -72,6 +72,27 @@ services:
       - "8080:8080"
     restart: unless-stopped
 
+  # BFF API (tRPC backend for frontend)
+  bff:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: albion-ingestor:latest
+    container_name: albion-bff
+    environment:
+      <<: *common-env
+      BFF_PORT: 3001
+      BFF_ALLOWED_ORIGINS: ${BFF_ALLOWED_ORIGINS:-http://localhost:3000,http://localhost:3001}
+    command: ["node", "dist/apps/bff.js"]
+    ports:
+      - "3001:3001"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3001/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
   # Redis for job queue and caching
   redis:
     image: redis:7-alpine
