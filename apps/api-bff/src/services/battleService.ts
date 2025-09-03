@@ -122,7 +122,7 @@ export class BattleService {
       });
 
       // Transform battles to include parsed JSON data
-      const transformedBattles: BattleListItem[] = battles.map(battle => {
+      const transformedBattles: BattleListItem[] = battles.map((battle: any) => {
         const guilds = Array.isArray(battle.guildsJson) ? battle.guildsJson : [];
         const alliances = Array.isArray(battle.alliancesJson) ? battle.alliancesJson : [];
 
