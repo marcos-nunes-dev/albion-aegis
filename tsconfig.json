@@ -25,6 +25,6 @@
     "allowUnusedLabels": false,
     "allowUnreachableCode": false
   },
-  "include": ["src/**/*", "apps/**/*"],
-  "exclude": ["node_modules", "dist", "**/*.test.ts"]
+  "include": ["src/**/*", "apps/*.ts"],
+  "exclude": ["node_modules", "dist", "**/*.test.ts", "apps/api-bff/**/*"]
 }

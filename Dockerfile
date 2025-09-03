@@ -23,7 +23,8 @@ WORKDIR /app
 COPY tsconfig.json ./
 COPY prisma ./prisma
 COPY src ./src
-COPY apps ./apps
+# Copy only the worker apps, exclude api-bff
+COPY apps/*.ts ./apps/
 
 # Prisma needs DATABASE_URL at generate-time; supply a dummy Postgres URL
 # (Prisma won't connect; it just needs provider to generate the client)
