@@ -54,13 +54,31 @@ app.use(express.json());
 
 
 // Health check endpoint
-app.get('/health', (_req, res) => {
-  res.json({
-    status: 'healthy',
-    timestamp: new Date().toISOString(),
-    service: 'albion-bff',
-    database: healthStatus.isConnected ? 'connected' : 'disconnected',
-  });
+app.get('/health', async (_req, res) => {
+  try {
+    // Get current database status
+    const currentHealthStatus = getHealthStatus();
+    
+    res.json({
+      status: 'healthy',
+      timestamp: new Date().toISOString(),
+      service: 'albion-bff',
+      database: currentHealthStatus.isConnected ? 'connected' : 'disconnected',
+      databaseDetails: {
+        lastHealthCheck: currentHealthStatus.lastHealthCheck,
+        connectionErrors: currentHealthStatus.connectionErrors,
+        poolConfig: currentHealthStatus.poolConfig,
+      },
+    });
+  } catch (error) {
+    res.status(500).json({
+      status: 'error',
+      timestamp: new Date().toISOString(),
+      service: 'albion-bff',
+      database: 'error',
+      error: error instanceof Error ? error.message : 'Unknown error',
+    });
+  }
 });
 
 // tRPC middleware
