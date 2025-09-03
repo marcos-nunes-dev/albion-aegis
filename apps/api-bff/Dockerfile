@@ -31,10 +31,9 @@ ENV NODE_ENV production
 RUN addgroup --system --gid 1001 nodejs
 RUN adduser --system --uid 1001 nextjs
 
-# Copy built application
+# Copy built application and ALL node_modules
 COPY --from=deps --chown=nextjs:nodejs /app/apps/api-bff/dist ./dist
-COPY --from=deps --chown=nextjs:nodejs /app/apps/api-bff/node_modules/.prisma ./node_modules/.prisma
-COPY --from=deps --chown=nextjs:nodejs /app/apps/api-bff/node_modules/@prisma ./node_modules/@prisma
+COPY --from=deps --chown=nextjs:nodejs /app/apps/api-bff/node_modules ./node_modules
 COPY --from=deps --chown=nextjs:nodejs /app/apps/api-bff/package.json ./package.json
 
 USER nextjs
