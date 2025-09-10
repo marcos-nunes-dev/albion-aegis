@@ -5,7 +5,7 @@ import { statisticsRouter } from "./routers/statistics.js";
 import { mmrFeedRouter } from "./routers/mmrFeed.js";
 import { createContext } from "./trpcContext.js";
 import { router } from "./trpc.js";
-import redis from '../../src/queue/connection.js';
+import redis from '../../../src/queue/connection.js';
 
 // Create the main app router
 const appRouter = router({
