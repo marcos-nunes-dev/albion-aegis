@@ -51,9 +51,7 @@ function sleep(ms: number): Promise<void> {
  * Upsert a battle to the database with complete data from API
  */
 async function upsertBattle(battle: BattleListItem) {
-  const existingBattle = await prisma.battle.findUnique({
-    where: { albionId: battle.albionId }
-  });
+  // Battle existence will be checked via try-catch on create
   
   // Fetch complete battle data from API to get full guild/alliance information
   let completeBattleData: BattleDetail | null = null;
@@ -79,19 +77,25 @@ async function upsertBattle(battle: BattleListItem) {
     ingestedAt: new Date(),
   };
   
-  if (existingBattle) {
-    const updatedBattle = await prisma.battle.update({
-      where: { albionId: battle.albionId },
-      data: battleData
-    });
-    console.log(`✅ Updated battle ${battle.albionId} with complete data (${guildsData.length} guilds, ${alliancesData.length} alliances)`);
-    return { battle: updatedBattle, wasCreated: false };
-  } else {
+  try {
+    // Try to create first (most common case)
     const newBattle = await prisma.battle.create({
       data: battleData
     });
     console.log(`✅ Created battle ${battle.albionId} with complete data (${guildsData.length} guilds, ${alliancesData.length} alliances)`);
     return { battle: newBattle, wasCreated: true };
+  } catch (error) {
+    // If creation fails due to unique constraint, try to update
+    if (error instanceof Error && error.message.includes('Unique constraint failed')) {
+      const updatedBattle = await prisma.battle.update({
+        where: { albionId: battle.albionId },
+        data: battleData
+      });
+      console.log(`✅ Updated battle ${battle.albionId} with complete data (${guildsData.length} guilds, ${alliancesData.length} alliances)`);
+      return { battle: updatedBattle, wasCreated: false };
+    } else {
+      throw error;
+    }
   }
 }
 

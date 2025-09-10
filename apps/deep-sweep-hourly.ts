@@ -86,10 +86,7 @@ async function runDeepSweepHourly(): Promise<void> {
               const alliancesData = completeBattleData?.alliances || battle.alliances;
               const guildsData = completeBattleData?.guilds || battle.guilds;
               
-              // Upsert battle using the same pattern as battle crawler
-              const existingBattle = await prisma.battle.findUnique({
-                where: { albionId: battle.albionId }
-              });
+              // Battle existence will be checked via try-catch on create
               
               const battleData = {
                 albionId: battle.albionId,
@@ -102,17 +99,21 @@ async function runDeepSweepHourly(): Promise<void> {
                 ingestedAt: new Date(),
               };
               
-              if (existingBattle) {
-                // Update existing battle
-                await prisma.battle.update({
-                  where: { albionId: battle.albionId },
-                  data: battleData
-                });
-              } else {
-                // Create new battle
+              try {
+                // Try to create first (most common case)
                 await prisma.battle.create({
                   data: battleData
                 });
+              } catch (error) {
+                // If creation fails due to unique constraint, try to update
+                if (error instanceof Error && error.message.includes('Unique constraint failed')) {
+                  await prisma.battle.update({
+                    where: { albionId: battle.albionId },
+                    data: battleData
+                  });
+                } else {
+                  throw error;
+                }
               }
 
               pageBattlesUpserted++;

@@ -45,19 +45,6 @@ async function upsertBattle(battle: BattleListItem) {
   return await executeWithRetry(async () => {
     const prisma = getPrisma();
     
-    // First, check if the battle already exists to avoid unnecessary API calls
-    const existingBattle = await prisma.battle.findUnique({
-      where: { albionId: battle.albionId }
-    });
-    
-    if (existingBattle) {
-      battleLogger.debug('Battle already exists, skipping processing', {
-        albionId: battle.albionId.toString(),
-        existingIngestedAt: existingBattle.ingestedAt
-      });
-      return { battle: existingBattle, wasCreated: false };
-    }
-    
     // Fetch complete battle data from API to get full guild/alliance information
     let completeBattleData: BattleDetail | null = null;
     try {
@@ -87,23 +74,43 @@ async function upsertBattle(battle: BattleListItem) {
       ingestedAt: new Date(),
     };
     
-    // Create the battle (we already checked it doesn't exist)
-    const createdBattle = await prisma.battle.create({
-      data: battleData
-    });
-    
-    // Record metrics for new battle
-    metrics.recordBattleUpsert();
-    
-    battleLogger.info('Created new battle with complete data', {
-      albionId: battle.albionId.toString(),
-      hasCompleteData: !!completeBattleData,
-      guildCount: guildsData.length,
-      allianceCount: alliancesData.length,
-      totalPlayers: battle.totalPlayers
-    });
-    
-    return { battle: createdBattle, wasCreated: true };
+    try {
+      // Try to create first (most common case)
+      const createdBattle = await prisma.battle.create({
+        data: battleData
+      });
+      
+      // Record metrics for new battle
+      metrics.recordBattleUpsert();
+      
+      battleLogger.info('Created new battle with complete data', {
+        albionId: battle.albionId.toString(),
+        hasCompleteData: !!completeBattleData,
+        guildCount: guildsData.length,
+        allianceCount: alliancesData.length,
+        totalPlayers: battle.totalPlayers
+      });
+      
+      return { battle: createdBattle, wasCreated: true };
+    } catch (error) {
+      // If creation fails due to unique constraint, battle already exists
+      if (error instanceof Error && error.message.includes('Unique constraint failed')) {
+        battleLogger.debug('Battle already exists, fetching existing record', {
+          albionId: battle.albionId.toString()
+        });
+        
+        const existingBattle = await prisma.battle.findUnique({
+          where: { albionId: battle.albionId }
+        });
+        
+        if (existingBattle) {
+          return { battle: existingBattle, wasCreated: false };
+        }
+      }
+      
+      // Re-throw if it's not a unique constraint error
+      throw error;
+    }
   });
 }
 
