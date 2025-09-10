@@ -200,9 +200,6 @@ export class BattleGapRecoveryService {
   private async upsertBattle(battle: BattleListItem) {
     return await executeWithRetry(async () => {
       const prisma = getPrisma();
-      const existingBattle = await prisma.battle.findUnique({
-        where: { albionId: battle.albionId }
-      });
       
       // Fetch complete battle data from API to get full guild/alliance information
       let completeBattleData = null;
@@ -233,19 +230,8 @@ export class BattleGapRecoveryService {
         ingestedAt: new Date(),
       };
       
-      if (existingBattle) {
-        // Update existing battle
-        const updatedBattle = await prisma.battle.update({
-          where: { albionId: battle.albionId },
-          data: battleData
-        });
-        
-        return {
-          battle: updatedBattle,
-          wasCreated: false
-        };
-      } else {
-        // Create new battle
+      try {
+        // Try to create first (most common case)
         const newBattle = await prisma.battle.create({
           data: battleData
         });
@@ -254,6 +240,26 @@ export class BattleGapRecoveryService {
           battle: newBattle,
           wasCreated: true
         };
+      } catch (error) {
+        // If creation fails due to unique constraint, try to update
+        if (error instanceof Error && error.message.includes('Unique constraint failed')) {
+          logger.debug('Battle already exists, updating instead', {
+            albionId: battle.albionId.toString()
+          });
+          
+          const updatedBattle = await prisma.battle.update({
+            where: { albionId: battle.albionId },
+            data: battleData
+          });
+          
+          return {
+            battle: updatedBattle,
+            wasCreated: false
+          };
+        }
+        
+        // Re-throw if it's not a unique constraint error
+        throw error;
       }
     });
   }

@@ -3,15 +3,17 @@ import { config } from '../lib/config.js';
 
 // Create Redis connection with Railway-compatible configuration
 const redis = new Redis(config.REDIS_URL, {
-  maxRetriesPerRequest: null, // Fixed for BullMQ compatibility
+  maxRetriesPerRequest: 3, // Add retry limit to prevent infinite loops
   lazyConnect: true,
   keepAlive: 30000,
-  connectTimeout: 30000, // Increased from 10s to 30s
-  commandTimeout: 30000, // Increased from 5s to 30s
+  connectTimeout: 60000, // Increased to 60s for better stability
+  commandTimeout: 60000, // Increased to 60s for better stability
   // High volume optimizations
   enableReadyCheck: true,
   // Connection pooling for high volume
   family: 4, // Force IPv4
+  // Add connection resilience
+  enableOfflineQueue: false, // Disable offline queue to fail fast
 });
 
 // Connection event handlers
@@ -25,6 +27,12 @@ redis.on('ready', () => {
 
 redis.on('error', (error) => {
   console.error('❌ Redis: Connection error:', error.message);
+  console.error('❌ Redis: Error details:', {
+    code: (error as any).code,
+    errno: (error as any).errno,
+    syscall: (error as any).syscall,
+    stack: error.stack
+  });
 });
 
 redis.on('close', () => {

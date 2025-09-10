@@ -1,7 +1,7 @@
 #!/usr/bin/env tsx
 
 import express from 'express';
-import cors from 'cors';
+const cors = require('cors');
 import { createExpressMiddleware } from '@trpc/server/adapters/express';
 import { appRouter } from '../src/bff/router.js';
 import { config } from '../src/lib/config.js';

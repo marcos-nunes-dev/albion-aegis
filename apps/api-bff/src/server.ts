@@ -136,7 +136,7 @@ const server = createServer(async (req, res) => {
               code: 'INTERNAL_SERVER_ERROR',
               message: error instanceof Error ? error.message : 'Internal server error'
             }
-          }, (key, value) => {
+          }, (_key, value) => {
             // Convert BigInt to string for JSON serialization
             return typeof value === 'bigint' ? value.toString() : value;
           }));
@@ -149,7 +149,7 @@ const server = createServer(async (req, res) => {
           result: {
             data: result
           }
-        }, (key, value) => {
+        }, (_key, value) => {
           // Convert BigInt to string for JSON serialization
           return typeof value === 'bigint' ? value.toString() : value;
         }));
