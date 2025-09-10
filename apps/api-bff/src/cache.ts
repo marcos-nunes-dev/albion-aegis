@@ -56,7 +56,7 @@ export class ApiCache {
    * Custom JSON serializer that handles BigInt values
    */
   private serializeForCache(data: any): string {
-    return JSON.stringify(data, (key, value) => {
+    return JSON.stringify(data, (_key, value) => {
       // Convert BigInt to string for serialization
       if (typeof value === 'bigint') {
         return value.toString();
@@ -69,7 +69,7 @@ export class ApiCache {
    * Custom JSON deserializer that handles BigInt values
    */
   private deserializeFromCache<T>(jsonString: string): T {
-    return JSON.parse(jsonString, (key, value) => {
+    return JSON.parse(jsonString, (_key, value) => {
       // Note: We don't convert strings back to BigInt here since the frontend expects strings
       // If you need BigInt conversion, you'd need to know which fields should be BigInt
       return value;
