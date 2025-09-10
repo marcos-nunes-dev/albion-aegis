@@ -81,9 +81,13 @@ case "$RAILWAY_SERVICE_NAME" in\n\
     echo "🏆 Starting MMR workers..."\n\
     exec node dist/apps/mmr-worker.js\n\
     ;;\n\
+  "albion-bff")\n\
+    echo "🌐 Starting BFF API server..."\n\
+    exec node dist/apps/api-bff/src/server.js\n\
+    ;;\n\
   *)\n\
     echo "❌ Unknown service: $RAILWAY_SERVICE_NAME"\n\
-    echo "Available services: albion-scheduler, albion-kills, albion-metrics, albion-mmr"\n\
+    echo "Available services: albion-scheduler, albion-kills, albion-metrics, albion-mmr, albion-bff"\n\
     exit 1\n\
     ;;\n\
 esac' > /app/start.sh && chmod +x /app/start.sh

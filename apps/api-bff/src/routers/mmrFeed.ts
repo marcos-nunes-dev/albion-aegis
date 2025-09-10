@@ -1,7 +1,7 @@
-import { router, publicProc } from "../trpc";
+import { router, publicProc } from "../trpc.js";
 import { z } from "zod";
-import { prisma } from "../db";
-import { apiCache, CACHE_TTL } from "../cache";
+import { prisma } from "../db.js";
+import { apiCache, CACHE_TTL } from "../cache.js";
 
 const MmrFeedInput = z.object({
   page: z.number().min(1).default(1),

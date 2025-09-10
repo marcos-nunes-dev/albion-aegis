@@ -3,7 +3,7 @@ import { seasonsRouter } from "./routers/seasons.js";
 import { guildsRouter } from "./routers/guilds.js";
 import { statisticsRouter } from "./routers/statistics.js";
 import { mmrFeedRouter } from "./routers/mmrFeed.js";
-import { createContext } from "./trpcContext";
+import { createContext } from "./trpcContext.js";
 import { router } from "./trpc.js";
 
 // Create the main app router

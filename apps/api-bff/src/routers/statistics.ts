@@ -1,6 +1,6 @@
-import { router, publicProc } from "../trpc";
-import { prisma } from "../db";
-import { apiCache, CACHE_TTL } from "../cache";
+import { router, publicProc } from "../trpc.js";
+import { prisma } from "../db.js";
+import { apiCache, CACHE_TTL } from "../cache.js";
 
 export const statisticsRouter = router({
   getOverview: publicProc
