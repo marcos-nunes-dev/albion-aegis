@@ -83,7 +83,7 @@ case "$RAILWAY_SERVICE_NAME" in\n\
     ;;\n\
   "albion-bff")\n\
     echo "🌐 Starting BFF API server..."\n\
-    exec node dist/apps/bff.js\n\
+    exec node dist/apps/api-bff/src/server.js\n\
     ;;\n\
   *)\n\
     echo "❌ Unknown service: $RAILWAY_SERVICE_NAME"\n\
