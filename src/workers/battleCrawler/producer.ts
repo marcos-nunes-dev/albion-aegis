@@ -74,43 +74,29 @@ async function upsertBattle(battle: BattleListItem) {
       ingestedAt: new Date(),
     };
     
-    try {
-      // Try to create first (most common case)
-      const createdBattle = await prisma.battle.create({
-        data: battleData
-      });
-      
-      // Record metrics for new battle
-      metrics.recordBattleUpsert();
-      
-      battleLogger.info('Created new battle with complete data', {
-        albionId: battle.albionId.toString(),
-        hasCompleteData: !!completeBattleData,
-        guildCount: guildsData.length,
-        allianceCount: alliancesData.length,
-        totalPlayers: battle.totalPlayers
-      });
-      
-      return { battle: createdBattle, wasCreated: true };
-    } catch (error) {
-      // If creation fails due to unique constraint, battle already exists
-      if (error instanceof Error && error.message.includes('Unique constraint failed')) {
-        battleLogger.debug('Battle already exists, fetching existing record', {
-          albionId: battle.albionId.toString()
-        });
-        
-        const existingBattle = await prisma.battle.findUnique({
-          where: { albionId: battle.albionId }
-        });
-        
-        if (existingBattle) {
-          return { battle: existingBattle, wasCreated: false };
-        }
-      }
-      
-      // Re-throw if it's not a unique constraint error
-      throw error;
-    }
+    // Use upsert to handle unique constraint automatically
+    const result = await prisma.battle.upsert({
+      where: { albionId: battle.albionId },
+      update: battleData,
+      create: battleData
+    });
+    
+    // Record metrics for battle upsert
+    metrics.recordBattleUpsert();
+    
+    // Check if this was a create or update by comparing timestamps
+    const wasCreated = result.ingestedAt.getTime() === battleData.ingestedAt.getTime();
+    
+    battleLogger.info(wasCreated ? 'Created new battle with complete data' : 'Updated existing battle with complete data', {
+      albionId: battle.albionId.toString(),
+      hasCompleteData: !!completeBattleData,
+      guildCount: guildsData.length,
+      allianceCount: alliancesData.length,
+      totalPlayers: battle.totalPlayers,
+      wasCreated
+    });
+    
+    return { battle: result, wasCreated };
   });
 }
 
@@ -118,7 +104,7 @@ async function upsertBattle(battle: BattleListItem) {
  * Determine if we should enqueue a kills fetch job for this battle
  * Implements improved logic for kill job enqueuing
  */
-function shouldEnqueueKills(battle: BattleListItem, dbBattle: any): boolean {
+function shouldEnqueueKills(battle: BattleListItem, dbBattle: { killsFetchedAt: Date | null }): boolean {
   const now = new Date();
   const battleStartTime = new Date(battle.startedAt);
   

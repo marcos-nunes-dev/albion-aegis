@@ -77,26 +77,18 @@ async function upsertBattle(battle: BattleListItem) {
     ingestedAt: new Date(),
   };
   
-  try {
-    // Try to create first (most common case)
-    const newBattle = await prisma.battle.create({
-      data: battleData
-    });
-    console.log(`✅ Created battle ${battle.albionId} with complete data (${guildsData.length} guilds, ${alliancesData.length} alliances)`);
-    return { battle: newBattle, wasCreated: true };
-  } catch (error) {
-    // If creation fails due to unique constraint, try to update
-    if (error instanceof Error && error.message.includes('Unique constraint failed')) {
-      const updatedBattle = await prisma.battle.update({
-        where: { albionId: battle.albionId },
-        data: battleData
-      });
-      console.log(`✅ Updated battle ${battle.albionId} with complete data (${guildsData.length} guilds, ${alliancesData.length} alliances)`);
-      return { battle: updatedBattle, wasCreated: false };
-    } else {
-      throw error;
-    }
-  }
+  // Use upsert to handle unique constraint automatically
+  const result = await prisma.battle.upsert({
+    where: { albionId: battle.albionId },
+    update: battleData,
+    create: battleData
+  });
+  
+  // Check if this was a create or update by comparing timestamps
+  const wasCreated = result.ingestedAt.getTime() === battleData.ingestedAt.getTime();
+  
+  console.log(`${wasCreated ? '✅ Created' : '✅ Updated'} battle ${battle.albionId} with complete data (${guildsData.length} guilds, ${alliancesData.length} alliances)`);
+  return { battle: result, wasCreated };
 }
 
 /**

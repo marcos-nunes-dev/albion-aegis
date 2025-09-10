@@ -248,31 +248,44 @@ async function testMmrCalculation(battleId: number) {
       where: { albionId: BigInt(battleId) }
     });
     
-    if (!existingBattle) {
-      // Create battle record in database
-      existingBattle = await prisma.battle.create({
-        data: {
-          albionId: BigInt(battleId),
-          startedAt: new Date(battleData.startedAt),
-          totalFame: battleData.totalFame,
-          totalKills: battleData.totalKills,
-          totalPlayers: battleData.totalPlayers,
-          alliancesJson: [], // Empty for now
-          guildsJson: guildStats.map(guildStat => ({
-            name: guildStat.guildName,
-            kills: guildStat.kills,
-            deaths: guildStat.deaths,
-            killFame: guildStat.fameGained,
-            players: guildStat.players,
-            ip: guildStat.avgIP,
-            albionId: guildStat.guildId
-          }))
-        }
-      });
-      console.log(`   ✅ Created battle record in database: ${existingBattle.albionId}`);
-    } else {
-      console.log(`   ℹ️  Battle already exists in database: ${existingBattle.albionId}`);
-    }
+    // Use upsert to handle unique constraint automatically
+    existingBattle = await prisma.battle.upsert({
+      where: { albionId: BigInt(battleId) },
+      update: {
+        startedAt: new Date(battleData.startedAt),
+        totalFame: battleData.totalFame,
+        totalKills: battleData.totalKills,
+        totalPlayers: battleData.totalPlayers,
+        alliancesJson: [], // Empty for now
+        guildsJson: guildStats.map(guildStat => ({
+          name: guildStat.guildName,
+          kills: guildStat.kills,
+          deaths: guildStat.deaths,
+          killFame: guildStat.fameGained,
+          players: guildStat.players,
+          ip: guildStat.avgIP,
+          albionId: guildStat.guildId
+        }))
+      },
+      create: {
+        albionId: BigInt(battleId),
+        startedAt: new Date(battleData.startedAt),
+        totalFame: battleData.totalFame,
+        totalKills: battleData.totalKills,
+        totalPlayers: battleData.totalPlayers,
+        alliancesJson: [], // Empty for now
+        guildsJson: guildStats.map(guildStat => ({
+          name: guildStat.guildName,
+          kills: guildStat.kills,
+          deaths: guildStat.deaths,
+          killFame: guildStat.fameGained,
+          players: guildStat.players,
+          ip: guildStat.avgIP,
+          albionId: guildStat.guildId
+        }))
+      }
+    });
+    console.log(`   ✅ Upserted battle record in database: ${existingBattle.albionId}`);
     
     // Step 5: Create battle analysis using the service
     console.log(`\n🔍 Step 5: Creating battle analysis...`);

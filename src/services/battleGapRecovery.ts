@@ -230,37 +230,25 @@ export class BattleGapRecoveryService {
         ingestedAt: new Date(),
       };
       
-      try {
-        // Try to create first (most common case)
-        const newBattle = await prisma.battle.create({
-          data: battleData
-        });
-        
-        return {
-          battle: newBattle,
-          wasCreated: true
-        };
-      } catch (error) {
-        // If creation fails due to unique constraint, try to update
-        if (error instanceof Error && error.message.includes('Unique constraint failed')) {
-          logger.debug('Battle already exists, updating instead', {
-            albionId: battle.albionId.toString()
-          });
-          
-          const updatedBattle = await prisma.battle.update({
-            where: { albionId: battle.albionId },
-            data: battleData
-          });
-          
-          return {
-            battle: updatedBattle,
-            wasCreated: false
-          };
-        }
-        
-        // Re-throw if it's not a unique constraint error
-        throw error;
-      }
+      // Use upsert to handle unique constraint automatically
+      const result = await prisma.battle.upsert({
+        where: { albionId: battle.albionId },
+        update: battleData,
+        create: battleData
+      });
+      
+      // Check if this was a create or update by comparing timestamps
+      const wasCreated = result.ingestedAt.getTime() === battleData.ingestedAt.getTime();
+      
+      logger.debug(wasCreated ? 'Created new battle in gap recovery' : 'Updated existing battle in gap recovery', {
+        albionId: battle.albionId.toString(),
+        wasCreated
+      });
+      
+      return {
+        battle: result,
+        wasCreated
+      };
     });
   }
 

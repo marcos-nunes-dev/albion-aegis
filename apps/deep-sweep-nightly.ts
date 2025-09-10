@@ -81,22 +81,12 @@ async function runDeepSweepNightly(): Promise<void> {
                 ingestedAt: new Date(),
               };
               
-              try {
-                // Try to create first (most common case)
-                await prisma.battle.create({
-                  data: battleData
-                });
-              } catch (error) {
-                // If creation fails due to unique constraint, try to update
-                if (error instanceof Error && error.message.includes('Unique constraint failed')) {
-                  await prisma.battle.update({
-                    where: { albionId: battle.albionId },
-                    data: battleData
-                  });
-                } else {
-                  throw error;
-                }
-              }
+              // Use upsert to handle unique constraint automatically
+              await prisma.battle.upsert({
+                where: { albionId: battle.albionId },
+                update: battleData,
+                create: battleData
+              });
 
               pageBattlesUpserted++;
               totalBattlesUpserted++;
