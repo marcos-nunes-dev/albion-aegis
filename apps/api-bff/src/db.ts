@@ -7,8 +7,19 @@ const globalForPrisma = globalThis as unknown as {
 console.log('🗄️ Initializing Prisma client...');
 console.log('🗄️ Database URL:', process.env.DATABASE_URL ? '[SET]' : '[NOT SET]');
 
+// Configure Prisma for Supabase connection pooling
+const databaseUrl = process.env.DATABASE_URL;
+const isSupabase = databaseUrl?.includes('supabase.com');
+
 export const prisma = globalForPrisma.prisma ?? new PrismaClient({
   log: ['query', 'error', 'warn'],
+  datasources: {
+    db: {
+      url: isSupabase 
+        ? `${databaseUrl}?pgbouncer=true&connection_limit=1&prepared_statements=false`
+        : databaseUrl,
+    },
+  },
 });
 
 // Test database connection
