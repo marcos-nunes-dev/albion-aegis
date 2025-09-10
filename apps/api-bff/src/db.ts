@@ -9,7 +9,11 @@ console.log('🗄️ Database URL:', process.env.DATABASE_URL ? '[SET]' : '[NOT 
 
 // Configure Prisma for Supabase connection pooling
 const databaseUrl = process.env.DATABASE_URL;
-const isSupabase = databaseUrl?.includes('supabase.com');
+if (!databaseUrl) {
+  throw new Error('DATABASE_URL environment variable is required');
+}
+
+const isSupabase = databaseUrl.includes('supabase.com');
 
 export const prisma = globalForPrisma.prisma ?? new PrismaClient({
   log: ['query', 'error', 'warn'],
