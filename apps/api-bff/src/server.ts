@@ -3,6 +3,7 @@ import { seasonsRouter } from "./routers/seasons.js";
 import { guildsRouter } from "./routers/guilds.js";
 import { statisticsRouter } from "./routers/statistics.js";
 import { mmrFeedRouter } from "./routers/mmrFeed.js";
+import { battlesRouter } from "./routers/battles.js";
 import { createContext } from "./trpcContext.js";
 import { router } from "./trpc.js";
 import redis from '../../../src/queue/connection.js';
@@ -13,6 +14,7 @@ const appRouter = router({
   guilds: guildsRouter,
   statistics: statisticsRouter,
   mmrFeed: mmrFeedRouter,
+  battles: battlesRouter,
 });
 
 const PORT = Number(process.env.PORT ?? 4000);
@@ -139,6 +141,12 @@ const server = createServer(async (req, res) => {
               result = await caller.mmrFeed.getFeed(params.input);
             } else if (procedureName === 'clearCache') {
               result = await caller.mmrFeed.clearCache();
+            }
+          } else if (routerName === 'battles') {
+            if (procedureName === 'headToHead') {
+              result = await caller.battles.headToHead(params.input);
+            } else if (procedureName === 'guildBattles') {
+              result = await caller.battles.guildBattles(params.input);
             }
           }
 

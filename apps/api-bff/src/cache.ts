@@ -164,4 +164,6 @@ export const CACHE_TTL = {
   SEASONS: 600,       // 10 minutes - seasons change very rarely
   GUILD_DETAIL: 240,  // 4 minutes - individual guild data
   MMR_FEED: 60,       // 1 minute - MMR feed changes frequently
+  BATTLES_HEAD_TO_HEAD: 300, // 5 minutes - head-to-head battles
+  BATTLES_GUILD: 180, // 3 minutes - guild battles
 } as const;
