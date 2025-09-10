@@ -142,129 +142,6 @@ export const guildsRouter = router({
       }
     }),
 
-  get: publicProc
-    .input(z.object({
-      identifier: z.string(),
-      seasonId: z.string().optional()
-    }))
-    .query(async ({ input }) => {
-      const { identifier, seasonId } = input;
-      
-      try {
-        return await apiCache.getOrSet(
-          'guilds',
-          ['get', input],
-          async () => {
-            let guild = await prisma.guild.findFirst({
-              where: {
-                OR: [
-                  { id: identifier },
-                  { name: identifier }
-                ]
-              },
-              include: {
-                guildSeasons: seasonId ? {
-                  where: { seasonId },
-                  include: { season: true }
-                } : {
-                  include: { season: true },
-                  orderBy: { season: { startDate: 'desc' } }
-                }
-              }
-            });
-
-            if (!guild) {
-              throw new Error('Guild not found');
-            }
-
-            return {
-              id: guild.id,
-              name: guild.name,
-              guildSeasons: guild.guildSeasons.map((gs) => ({
-                seasonId: gs.seasonId,
-                seasonName: gs.season.name,
-                currentMmr: gs.currentMmr,
-                totalBattles: gs.totalBattles,
-                wins: gs.wins,
-                losses: gs.losses,
-                winRate: gs.totalBattles > 0 ? (gs.wins / gs.totalBattles * 100).toFixed(1) : '0.0',
-                totalFameGained: gs.totalFameGained,
-                totalFameLost: gs.totalFameLost,
-                primeTimeBattles: gs.primeTimeBattles,
-                lastBattleAt: gs.lastBattleAt
-              }))
-            };
-          },
-          { ttl: CACHE_TTL.GUILD_DETAIL }
-        );
-      } catch (error) {
-        console.error('Error fetching guild:', error);
-        throw new Error('Failed to fetch guild');
-      }
-    }),
-
-  topByMmr: publicProc
-    .input(z.object({
-      seasonId: z.string(),
-      limit: z.number().min(1).max(100).default(100)
-    }))
-    .query(async ({ input }) => {
-      const { seasonId, limit } = input;
-      
-      try {
-        return await apiCache.getOrSet(
-          'guilds',
-          ['topByMmr', input],
-          async () => {
-            const topGuilds = await prisma.guildSeason.findMany({
-              where: { seasonId },
-              orderBy: { currentMmr: 'desc' },
-              take: limit,
-              include: {
-                guild: true,
-                season: true,
-                primeTimeMasses: {
-                  include: {
-                    primeTimeWindow: true
-                  }
-                }
-              }
-            });
-
-            return topGuilds.map((gs) => {
-              // Calculate average mass across all prime time windows
-              const avgMass = gs.primeTimeMasses.length > 0 
-                ? gs.primeTimeMasses.reduce((sum, mass) => sum + mass.avgMass, 0) / gs.primeTimeMasses.length
-                : 0;
-
-              return {
-                rank: 0,
-                id: gs.guild.id,
-                name: gs.guild.name,
-                currentMmr: gs.currentMmr,
-                totalBattles: gs.totalBattles,
-                wins: gs.wins,
-                losses: gs.losses,
-                winRate: gs.totalBattles > 0 ? (gs.wins / gs.totalBattles * 100).toFixed(1) : '0.0',
-                totalFameGained: gs.totalFameGained,
-                totalFameLost: gs.totalFameLost,
-                primeTimeBattles: gs.primeTimeBattles,
-                avgMass: Math.round(avgMass * 10) / 10, // Round to 1 decimal place
-                lastBattleAt: gs.lastBattleAt
-              };
-            }).map((guild, index) => ({
-              ...guild,
-              rank: index + 1
-            }));
-          },
-          { ttl: CACHE_TTL.GUILDS_TOP }
-        );
-      } catch (error) {
-        console.error('Error fetching top guilds:', error);
-        throw new Error('Failed to fetch top guilds');
-      }
-    }),
-
   topAllTime: publicProc
     .input(z.object({
       limit: z.number().min(1).max(100).default(3)
@@ -373,5 +250,6 @@ export const guildsRouter = router({
         throw new Error('Failed to fetch all-time top guilds');
       }
     })
+
 });
 

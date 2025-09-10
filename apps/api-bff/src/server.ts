@@ -93,16 +93,10 @@ const server = createServer(async (req, res) => {
               result = await caller.seasons.getActive();
             } else if (procedureName === 'list') {
               result = await caller.seasons.list(params.input);
-            } else if (procedureName === 'get') {
-              result = await caller.seasons.get(params.input);
             }
           } else if (routerName === 'guilds') {
             if (procedureName === 'list') {
               result = await caller.guilds.list(params.input);
-            } else if (procedureName === 'get') {
-              result = await caller.guilds.get(params.input);
-            } else if (procedureName === 'topByMmr') {
-              result = await caller.guilds.topByMmr(params.input);
             } else if (procedureName === 'topAllTime') {
               result = await caller.guilds.topAllTime(params.input);
             }
@@ -113,8 +107,8 @@ const server = createServer(async (req, res) => {
           } else if (routerName === 'mmrFeed') {
             if (procedureName === 'getFeed') {
               result = await caller.mmrFeed.getFeed(params.input);
-            } else if (procedureName === 'getBattleDetails') {
-              result = await caller.mmrFeed.getBattleDetails(params.input);
+            } else if (procedureName === 'clearCache') {
+              result = await caller.mmrFeed.clearCache();
             }
           }
 

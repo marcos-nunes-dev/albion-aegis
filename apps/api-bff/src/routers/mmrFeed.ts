@@ -7,14 +7,22 @@ const MmrFeedInput = z.object({
   page: z.number().min(1).default(1),
   pageSize: z.number().min(1).max(50).default(20),
   seasonId: z.string().optional(),
-  guildId: z.string().optional(),
-  minMmrChange: z.number().optional(), // Filter by minimum MMR change
-  maxMmrChange: z.number().optional(), // Filter by maximum MMR change
-  isWin: z.boolean().optional(), // Filter by win/loss
-  isPrimeTime: z.boolean().optional(), // Filter by prime time battles
+  searchTerm: z.string().optional(), // Search by battle ID or guild name
 });
 
 export const mmrFeedRouter = router({
+  // Clear cache endpoint for debugging
+  clearCache: publicProc
+    .query(async () => {
+      try {
+        await apiCache.invalidatePattern('mmrFeed:*');
+        return { success: true, message: 'MMR feed cache cleared' };
+      } catch (error) {
+        console.error('Error clearing MMR feed cache:', error);
+        throw new Error('Failed to clear cache');
+      }
+    }),
+
   getFeed: publicProc
     .input(MmrFeedInput)
     .query(async ({ input }) => {
@@ -22,11 +30,7 @@ export const mmrFeedRouter = router({
         page, 
         pageSize, 
         seasonId, 
-        guildId, 
-        minMmrChange, 
-        maxMmrChange, 
-        isWin, 
-        isPrimeTime 
+        searchTerm 
       } = input;
 
       try {
@@ -41,26 +45,23 @@ export const mmrFeedRouter = router({
               whereClause.seasonId = seasonId;
             }
             
-            if (guildId) {
-              whereClause.guildId = guildId;
-            }
-            
-            if (minMmrChange !== undefined || maxMmrChange !== undefined) {
-              whereClause.mmrChange = {};
-              if (minMmrChange !== undefined) {
-                whereClause.mmrChange.gte = minMmrChange;
+            // Search by battle ID or guild name
+            if (searchTerm) {
+              const searchTermStr = searchTerm.trim();
+              
+              // Check if search term is numeric (battle ID)
+              const isNumeric = /^\d+$/.test(searchTermStr);
+              
+              if (isNumeric) {
+                // Search by battle ID
+                whereClause.battleId = BigInt(searchTermStr);
+              } else {
+                // Search by guild name (case insensitive)
+                whereClause.guildName = {
+                  contains: searchTermStr,
+                  mode: 'insensitive'
+                };
               }
-              if (maxMmrChange !== undefined) {
-                whereClause.mmrChange.lte = maxMmrChange;
-              }
-            }
-            
-            if (isWin !== undefined) {
-              whereClause.isWin = isWin;
-            }
-            
-            if (isPrimeTime !== undefined) {
-              whereClause.isPrimeTime = isPrimeTime;
             }
 
             // Get MMR calculation logs with pagination
@@ -86,7 +87,7 @@ export const mmrFeedRouter = router({
               
               if (!battleGroups.has(battleId)) {
                 battleGroups.set(battleId, {
-                  battleId: log.battleId,
+                  battleId: log.battleId.toString(), // Convert BigInt to string
                   seasonId: log.seasonId,
                   seasonName: log.season.name,
                   totalBattlePlayers: log.totalBattlePlayers,
@@ -102,7 +103,7 @@ export const mmrFeedRouter = router({
               battle.guilds.push({
                 id: log.guildId,
                 name: log.guildName,
-                allianceName: log.allianceName,
+                allianceName: (log.allianceName && log.allianceName !== '{}' && log.allianceName.trim()) || null, // Ensure allianceName is valid string or null
                 previousMmr: log.previousMmr,
                 mmrChange: log.mmrChange,
                 newMmr: log.newMmr,
@@ -111,7 +112,7 @@ export const mmrFeedRouter = router({
                 deaths: log.deaths,
                 fameGained: log.fameGained,
                 fameLost: log.fameLost,
-                players: log.players,
+                players: Array.isArray(log.players) ? log.players : (log.players ? [log.players] : []), // Ensure players is always an array
                 avgIP: log.avgIP,
                 hasSignificantParticipation: log.hasSignificantParticipation,
                 antiFarmingFactor: log.antiFarmingFactor,
@@ -131,7 +132,7 @@ export const mmrFeedRouter = router({
               totalBattles: feedData.length
             };
           },
-          { ttl: CACHE_TTL.GUILDS_LIST } // Use similar TTL as guilds list
+          { ttl: CACHE_TTL.MMR_FEED } // Use MMR feed specific TTL (1 minute)
         );
       } catch (error) {
         console.error('Error fetching MMR feed:', error);
@@ -139,76 +140,4 @@ export const mmrFeedRouter = router({
       }
     }),
 
-  getBattleDetails: publicProc
-    .input(z.object({
-      battleId: z.string(),
-      seasonId: z.string().optional()
-    }))
-    .query(async ({ input }) => {
-      const { battleId, seasonId } = input;
-      
-      try {
-        return await apiCache.getOrSet(
-          'mmrFeed',
-          ['getBattleDetails', input],
-          async () => {
-            const whereClause: any = {
-              battleId: BigInt(battleId)
-            };
-            
-            if (seasonId) {
-              whereClause.seasonId = seasonId;
-            }
-
-            const mmrLogs = await prisma.mmrCalculationLog.findMany({
-              where: whereClause,
-              include: {
-                guild: true,
-                season: true,
-              },
-              orderBy: { mmrChange: 'desc' }
-            });
-
-            if (mmrLogs.length === 0) {
-              throw new Error('Battle not found');
-            }
-
-            const firstLog = mmrLogs[0];
-            
-            return {
-              battleId: firstLog.battleId,
-              seasonId: firstLog.seasonId,
-              seasonName: firstLog.season.name,
-              totalBattlePlayers: firstLog.totalBattlePlayers,
-              totalBattleFame: firstLog.totalBattleFame,
-              battleDuration: firstLog.battleDuration,
-              isPrimeTime: firstLog.isPrimeTime,
-              processedAt: firstLog.processedAt,
-              guilds: mmrLogs.map(log => ({
-                id: log.guildId,
-                name: log.guildName,
-                allianceName: log.allianceName,
-                previousMmr: log.previousMmr,
-                mmrChange: log.mmrChange,
-                newMmr: log.newMmr,
-                isWin: log.isWin,
-                kills: log.kills,
-                deaths: log.deaths,
-                fameGained: log.fameGained,
-                fameLost: log.fameLost,
-                players: log.players,
-                avgIP: log.avgIP,
-                hasSignificantParticipation: log.hasSignificantParticipation,
-                antiFarmingFactor: log.antiFarmingFactor,
-                originalMmrChange: log.originalMmrChange
-              }))
-            };
-          },
-          { ttl: CACHE_TTL.GUILD_DETAIL }
-        );
-      } catch (error) {
-        console.error('Error fetching battle details:', error);
-        throw new Error('Failed to fetch battle details');
-      }
-    })
 });

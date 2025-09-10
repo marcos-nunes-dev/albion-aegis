@@ -41,7 +41,7 @@ export class ApiCache {
       
       if (cached) {
         console.log(`🎯 Cache HIT: ${key}`);
-        return JSON.parse(cached);
+        return this.deserializeFromCache<T>(cached);
       }
       
       console.log(`❌ Cache MISS: ${key}`);
@@ -50,6 +50,30 @@ export class ApiCache {
       console.error('Cache get error:', error);
       return null;
     }
+  }
+
+  /**
+   * Custom JSON serializer that handles BigInt values
+   */
+  private serializeForCache(data: any): string {
+    return JSON.stringify(data, (key, value) => {
+      // Convert BigInt to string for serialization
+      if (typeof value === 'bigint') {
+        return value.toString();
+      }
+      return value;
+    });
+  }
+
+  /**
+   * Custom JSON deserializer that handles BigInt values
+   */
+  private deserializeFromCache<T>(jsonString: string): T {
+    return JSON.parse(jsonString, (key, value) => {
+      // Note: We don't convert strings back to BigInt here since the frontend expects strings
+      // If you need BigInt conversion, you'd need to know which fields should be BigInt
+      return value;
+    });
   }
 
   /**
@@ -65,7 +89,7 @@ export class ApiCache {
       const key = this.generateKey(prefix, ...keyParts);
       const ttl = options.ttl || this.defaultTTL;
       
-      await redis.setex(key, ttl, JSON.stringify(data));
+      await redis.setex(key, ttl, this.serializeForCache(data));
       console.log(`💾 Cache SET: ${key} (TTL: ${ttl}s)`);
     } catch (error) {
       console.error('Cache set error:', error);
@@ -135,4 +159,5 @@ export const CACHE_TTL = {
   GUILDS_TOP: 120,    // 2 minutes - top guilds change more frequently
   SEASONS: 600,       // 10 minutes - seasons change very rarely
   GUILD_DETAIL: 240,  // 4 minutes - individual guild data
+  MMR_FEED: 60,       // 1 minute - MMR feed changes frequently
 } as const;
