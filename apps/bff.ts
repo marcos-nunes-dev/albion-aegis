@@ -52,7 +52,7 @@ app.use(cors(corsOptions));
 app.use(express.json());
 
 // Debug middleware to log all requests
-app.use((req, res, next) => {
+app.use((req, _res, next) => {
   console.log(`📥 ${req.method} ${req.path} - ${req.get('User-Agent')?.substring(0, 50)}...`);
   next();
 });
