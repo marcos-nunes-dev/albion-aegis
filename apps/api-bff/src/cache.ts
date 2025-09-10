@@ -47,7 +47,8 @@ export class ApiCache {
       console.log(`❌ Cache MISS: ${key}`);
       return null;
     } catch (error) {
-      console.error('Cache get error:', error);
+      console.error('Cache get error (falling back to no cache):', error);
+      // Return null instead of throwing - this allows the app to continue without cache
       return null;
     }
   }
@@ -92,7 +93,8 @@ export class ApiCache {
       await redis.setex(key, ttl, this.serializeForCache(data));
       console.log(`💾 Cache SET: ${key} (TTL: ${ttl}s)`);
     } catch (error) {
-      console.error('Cache set error:', error);
+      console.error('Cache set error (continuing without cache):', error);
+      // Don't throw - allow the app to continue without caching
     }
   }
 
@@ -105,7 +107,8 @@ export class ApiCache {
       await redis.del(key);
       console.log(`🗑️ Cache DELETE: ${key}`);
     } catch (error) {
-      console.error('Cache delete error:', error);
+      console.error('Cache delete error (continuing without cache):', error);
+      // Don't throw - allow the app to continue without caching
     }
   }
 
@@ -120,7 +123,8 @@ export class ApiCache {
         console.log(`🧹 Cache INVALIDATE: ${keys.length} keys matching ${pattern}`);
       }
     } catch (error) {
-      console.error('Cache invalidate error:', error);
+      console.error('Cache invalidate error (continuing without cache):', error);
+      // Don't throw - allow the app to continue without caching
     }
   }
 

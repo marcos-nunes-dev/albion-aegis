@@ -5,7 +5,6 @@
     "buildCommand": "npm run build"
   },
   "deploy": {
-    "startCommand": "node dist/apps/api-bff/src/server.js",
     "healthcheckPath": "/healthz",
     "healthcheckTimeout": 300,
     "restartPolicyType": "ON_FAILURE",
@@ -13,7 +12,7 @@
   },
   "variables": {
     "NODE_ENV": "production",
-    "PORT": "4000",
+    "RAILWAY_SERVICE_NAME": "albion-bff",
     "BFF_ALLOWED_ORIGINS": "https://your-frontend-domain.com,http://localhost:3000"
   }
 }
