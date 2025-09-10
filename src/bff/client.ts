@@ -1,9 +1,11 @@
 import { createTRPCProxyClient, httpBatchLink } from '@trpc/client';
+import superjson from 'superjson';
 import type { AppRouter } from './router.js';
 
 // Create tRPC client for use in Next.js frontend
 export const createBFFClient = (baseUrl: string = 'http://localhost:3001') => {
   return createTRPCProxyClient<AppRouter>({
+    transformer: superjson,
     links: [
       httpBatchLink({
         url: `${baseUrl}/trpc`,
