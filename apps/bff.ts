@@ -51,6 +51,12 @@ const corsOptions = {
 app.use(cors(corsOptions));
 app.use(express.json());
 
+// Debug middleware to log all requests
+app.use((req, res, next) => {
+  console.log(`📥 ${req.method} ${req.path} - ${req.get('User-Agent')?.substring(0, 50)}...`);
+  next();
+});
+
 
 
 // Health check endpoint
@@ -81,10 +87,30 @@ app.get('/health', async (_req, res) => {
   }
 });
 
+// Test tRPC router availability
+app.get('/trpc-test', (_req, res) => {
+  try {
+    const routerKeys = Object.keys(appRouter._def.procedures || {});
+    res.json({
+      status: 'tRPC router loaded',
+      availableProcedures: routerKeys,
+      routerType: typeof appRouter,
+    });
+  } catch (error) {
+    res.status(500).json({
+      status: 'tRPC router error',
+      error: error instanceof Error ? error.message : 'Unknown error',
+    });
+  }
+});
+
 // tRPC middleware
 app.use('/trpc', createExpressMiddleware({
   router: appRouter,
   createContext: () => ({}),
+  onError: ({ error, path }) => {
+    console.error(`❌ tRPC Error on '${path}':`, error);
+  },
 }));
 
 // Basic info endpoint
