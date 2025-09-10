@@ -131,6 +131,8 @@ const server = createServer(async (req, res) => {
               result = await caller.guilds.list(params.input);
             } else if (procedureName === 'topAllTime') {
               result = await caller.guilds.topAllTime(params.input);
+            } else if (procedureName === 'getPrimeTimeMass') {
+              result = await caller.guilds.getPrimeTimeMass(params.input);
             }
           } else if (routerName === 'statistics') {
             if (procedureName === 'getOverview') {
@@ -147,6 +149,8 @@ const server = createServer(async (req, res) => {
               result = await caller.battles.headToHead(params.input);
             } else if (procedureName === 'guildBattles') {
               result = await caller.battles.guildBattles(params.input);
+            } else if (procedureName === 'getPrimeTimeBattles') {
+              result = await caller.battles.getPrimeTimeBattles(params.input);
             }
           }
 

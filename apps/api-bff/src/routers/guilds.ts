@@ -249,6 +249,148 @@ export const guildsRouter = router({
         console.error('Error fetching all-time top guilds:', error);
         throw new Error('Failed to fetch all-time top guilds');
       }
+    }),
+
+  // Get prime time mass data for a specific guild
+  getPrimeTimeMass: publicProc
+    .input(z.object({
+      guildId: z.string(),
+      seasonId: z.string().optional()
+    }))
+    .query(async ({ input }) => {
+      const { guildId, seasonId } = input;
+      
+      try {
+        return await apiCache.getOrSet(
+          'guilds',
+          ['getPrimeTimeMass', input],
+          async () => {
+            // Get the active season if no seasonId provided
+            let targetSeasonId = seasonId;
+            if (!targetSeasonId) {
+              const activeSeason = await prisma.season.findFirst({
+                where: { isActive: true },
+                orderBy: { startDate: 'desc' }
+              });
+              if (!activeSeason) {
+                throw new Error('No active season found');
+              }
+              targetSeasonId = activeSeason.id;
+            }
+
+            // Get guild season data with prime time masses
+            const guildSeason = await prisma.guildSeason.findFirst({
+              where: {
+                guildId,
+                seasonId: targetSeasonId
+              },
+              include: {
+                guild: true,
+                season: true,
+                primeTimeMasses: {
+                  include: {
+                    primeTimeWindow: true
+                  }
+                }
+              }
+            });
+
+            if (!guildSeason) {
+              throw new Error('Guild not found in this season');
+            }
+
+            // Get all prime time windows to ensure we show all available windows
+            const allPrimeTimeWindows = await prisma.primeTimeWindow.findMany({
+              orderBy: { startHour: 'asc' }
+            });
+
+            // Create a map of prime time masses by window ID
+            const massMap = new Map();
+            guildSeason.primeTimeMasses.forEach(mass => {
+              massMap.set(mass.primeTimeWindowId, mass);
+            });
+
+            // Build the response with all prime time windows
+            const primeTimeData = await Promise.all(allPrimeTimeWindows.map(async (window) => {
+              const massData = massMap.get(window.id);
+              
+              // Count actual MMR calculation logs for this prime time window
+              let mmrBattleCount = 0;
+              let lastMmrBattleAt = null;
+              
+              try {
+                // Get MMR calculation logs for this prime time window
+                const mmrLogs = await prisma.mmrCalculationLog.findMany({
+                  where: {
+                    guildId,
+                    seasonId: targetSeasonId,
+                    processedAt: {
+                      gte: guildSeason.season.startDate,
+                      lte: guildSeason.season.endDate || new Date()
+                    }
+                  },
+                  select: {
+                    processedAt: true,
+                    battleId: true
+                  }
+                });
+
+                // Filter by hour of day for prime time
+                const filteredLogs = mmrLogs.filter(log => {
+                  const logHour = log.processedAt.getUTCHours();
+                  
+                  if (window.endHour < window.startHour) {
+                    // Overnight window (e.g., 22:00 to 02:00)
+                    return logHour >= window.startHour || logHour < window.endHour;
+                  } else {
+                    // Same day window (e.g., 20:00 to 22:00)
+                    return logHour >= window.startHour && logHour < window.endHour;
+                  }
+                });
+
+                // Count unique battles
+                const uniqueBattles = new Set(filteredLogs.map(log => log.battleId.toString()));
+                mmrBattleCount = uniqueBattles.size;
+                
+                // Get the most recent battle time
+                if (filteredLogs.length > 0) {
+                  lastMmrBattleAt = filteredLogs
+                    .sort((a, b) => b.processedAt.getTime() - a.processedAt.getTime())[0]
+                    .processedAt;
+                }
+              } catch (error) {
+                console.warn('Error counting MMR battles for prime time window:', error);
+              }
+
+              return {
+                windowId: window.id,
+                startHour: window.startHour,
+                endHour: window.endHour,
+                timezone: window.timezone,
+                avgMass: massData?.avgMass || 0,
+                battleCount: mmrBattleCount, // Use MMR battle count instead
+                lastBattleAt: lastMmrBattleAt || massData?.lastBattleAt
+              };
+            }));
+
+            return {
+              guild: {
+                id: guildSeason.guild.id,
+                name: guildSeason.guild.name
+              },
+              season: {
+                id: guildSeason.season.id,
+                name: guildSeason.season.name
+              },
+              primeTimeData
+            };
+          },
+          { ttl: CACHE_TTL.GUILDS_LIST }
+        );
+      } catch (error) {
+        console.error('Error fetching guild prime time mass:', error);
+        throw new Error('Failed to fetch guild prime time mass data');
+      }
     })
 
 });

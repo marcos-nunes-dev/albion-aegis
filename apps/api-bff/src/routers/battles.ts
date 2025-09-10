@@ -310,5 +310,176 @@ export const battlesRouter = router({
         console.error('Error fetching guild battles:', error);
         throw new Error('Failed to fetch guild battles');
       }
+    }),
+
+  // Get MMR calculation logs for battles in a specific time range (for prime time battles)
+  getPrimeTimeBattles: publicProc
+    .input(z.object({
+      guildId: z.string(),
+      startHour: z.number().min(0).max(23),
+      endHour: z.number().min(0).max(23),
+      seasonId: z.string().optional(),
+      page: z.number().min(1).default(1),
+      pageSize: z.number().min(1).max(100).default(20)
+    }))
+    .query(async ({ input }) => {
+      const { guildId, startHour, endHour, seasonId, page, pageSize } = input;
+      
+      try {
+        // Get the active season if no seasonId provided
+        let targetSeasonId = seasonId;
+        if (!targetSeasonId) {
+          const activeSeason = await prisma.season.findFirst({
+            where: { isActive: true },
+            orderBy: { startDate: 'desc' }
+          });
+          if (!activeSeason) {
+            throw new Error('No active season found');
+          }
+          targetSeasonId = activeSeason.id;
+        }
+
+        // Get guild name
+        const guild = await prisma.guild.findUnique({ where: { id: guildId } });
+        if (!guild) {
+          throw new Error('Guild not found');
+        }
+
+        // Get season data to determine the date range
+        const season = await prisma.season.findUnique({
+          where: { id: targetSeasonId }
+        });
+        if (!season) {
+          throw new Error('Season not found');
+        }
+
+        // Get MMR calculation logs for battles during prime time hours throughout the season
+        // We need to filter by hour of day, not specific dates
+        const [logs, total] = await Promise.all([
+          prisma.mmrCalculationLog.findMany({
+            where: {
+              guildId,
+              seasonId: targetSeasonId,
+              processedAt: {
+                gte: season.startDate,
+                lte: season.endDate || new Date()
+              },
+              // Filter by hour of day for prime time
+              ...(endHour < startHour ? {
+                // Overnight window (e.g., 22:00 to 02:00)
+                OR: [
+                  {
+                    processedAt: {
+                      gte: season.startDate,
+                      lte: season.endDate || new Date()
+                    }
+                  }
+                ]
+              } : {
+                // Same day window - we'll filter by hour in the application logic
+              })
+            },
+            include: {
+              season: true,
+              guild: true
+            },
+            orderBy: { processedAt: 'desc' },
+            skip: (page - 1) * pageSize,
+            take: pageSize * 3 // Get more to account for hour filtering
+          }),
+          prisma.mmrCalculationLog.count({
+            where: {
+              guildId,
+              seasonId: targetSeasonId,
+              processedAt: {
+                gte: season.startDate,
+                lte: season.endDate || new Date()
+              }
+            }
+          })
+        ]);
+
+        // Filter logs by hour of day for prime time
+        const filteredLogs = logs.filter(log => {
+          const logHour = log.processedAt.getUTCHours();
+          
+          if (endHour < startHour) {
+            // Overnight window (e.g., 22:00 to 02:00)
+            return logHour >= startHour || logHour < endHour;
+          } else {
+            // Same day window (e.g., 20:00 to 22:00)
+            return logHour >= startHour && logHour < endHour;
+          }
+        }).slice(0, pageSize); // Limit to page size after filtering
+
+        console.log(`🔍 Prime time filtering: ${startHour}:00-${endHour}:00 UTC`);
+        console.log(`📊 Found ${logs.length} total logs, ${filteredLogs.length} after hour filtering`);
+        if (filteredLogs.length > 0) {
+          console.log(`⏰ Sample log hours:`, filteredLogs.slice(0, 3).map(log => ({
+            hour: log.processedAt.getUTCHours(),
+            date: log.processedAt.toISOString()
+          })));
+        }
+
+        // Group logs by battle ID to get battle summaries
+        const battleMap = new Map();
+        filteredLogs.forEach(log => {
+          if (!battleMap.has(log.battleId)) {
+            battleMap.set(log.battleId, {
+              battleId: log.battleId.toString(),
+              seasonId: log.seasonId,
+              seasonName: log.season.name,
+              totalBattlePlayers: log.totalBattlePlayers,
+              totalBattleFame: log.totalBattleFame,
+              battleDuration: log.battleDuration,
+              isPrimeTime: log.isPrimeTime,
+              processedAt: log.processedAt,
+              guilds: []
+            });
+          }
+          
+          const battle = battleMap.get(log.battleId);
+          battle.guilds.push({
+            guildId: log.guildId,
+            guildName: log.guildName,
+            previousMmr: log.previousMmr,
+            mmrChange: log.mmrChange,
+            newMmr: log.newMmr,
+            isWin: log.isWin,
+            kills: log.kills,
+            deaths: log.deaths,
+            fameGained: log.fameGained,
+            fameLost: log.fameLost,
+            players: log.players,
+            avgIP: log.avgIP,
+            hasSignificantParticipation: log.hasSignificantParticipation,
+            antiFarmingFactor: log.antiFarmingFactor,
+            originalMmrChange: log.originalMmrChange
+          });
+        });
+
+        const battles = Array.from(battleMap.values());
+
+        return {
+          data: battles,
+          page,
+          pageSize,
+          total: battles.length,
+          hasMore: false, // We're filtering in memory, so pagination is simplified
+          timeRange: {
+            startHour,
+            endHour,
+            startTime: season.startDate.toISOString(),
+            endTime: (season.endDate || new Date()).toISOString()
+          },
+          guild: {
+            id: guild.id,
+            name: guild.name
+          }
+        };
+      } catch (error) {
+        console.error('Error fetching prime time battles:', error);
+        throw new Error('Failed to fetch prime time battles');
+      }
     })
 });
