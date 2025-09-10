@@ -355,49 +355,37 @@ export const battlesRouter = router({
 
         // Get MMR calculation logs for battles during prime time hours throughout the season
         // We need to filter by hour of day, not specific dates
-        const [logs, total] = await Promise.all([
-          prisma.mmrCalculationLog.findMany({
-            where: {
-              guildId,
-              seasonId: targetSeasonId,
-              processedAt: {
-                gte: season.startDate,
-                lte: season.endDate || new Date()
-              },
-              // Filter by hour of day for prime time
-              ...(endHour < startHour ? {
-                // Overnight window (e.g., 22:00 to 02:00)
-                OR: [
-                  {
-                    processedAt: {
-                      gte: season.startDate,
-                      lte: season.endDate || new Date()
-                    }
+        const logs = await prisma.mmrCalculationLog.findMany({
+          where: {
+            guildId,
+            seasonId: targetSeasonId,
+            processedAt: {
+              gte: season.startDate,
+              lte: season.endDate || new Date()
+            },
+            // Filter by hour of day for prime time
+            ...(endHour < startHour ? {
+              // Overnight window (e.g., 22:00 to 02:00)
+              OR: [
+                {
+                  processedAt: {
+                    gte: season.startDate,
+                    lte: season.endDate || new Date()
                   }
-                ]
-              } : {
-                // Same day window - we'll filter by hour in the application logic
-              })
-            },
-            include: {
-              season: true,
-              guild: true
-            },
-            orderBy: { processedAt: 'desc' },
-            skip: (page - 1) * pageSize,
-            take: pageSize * 3 // Get more to account for hour filtering
-          }),
-          prisma.mmrCalculationLog.count({
-            where: {
-              guildId,
-              seasonId: targetSeasonId,
-              processedAt: {
-                gte: season.startDate,
-                lte: season.endDate || new Date()
-              }
-            }
-          })
-        ]);
+                }
+              ]
+            } : {
+              // Same day window - we'll filter by hour in the application logic
+            })
+          },
+          include: {
+            season: true,
+            guild: true
+          },
+          orderBy: { processedAt: 'desc' },
+          skip: (page - 1) * pageSize,
+          take: pageSize * 3 // Get more to account for hour filtering
+        });
 
         // Filter logs by hour of day for prime time
         const filteredLogs = logs.filter(log => {
