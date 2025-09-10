@@ -70,7 +70,7 @@ Railway will automatically use your existing `Dockerfile` and build the BFF serv
 ```dockerfile
 # Railway will use your existing Dockerfile
 # Build command: npm run build
-# Start command: node dist/apps/bff.js
+# Start command: node dist/apps/api-bff/src/server.js
 ```
 
 ## 🔗 Service Integration

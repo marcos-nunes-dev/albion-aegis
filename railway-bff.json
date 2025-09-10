@@ -5,15 +5,15 @@
     "buildCommand": "npm run build"
   },
   "deploy": {
-    "startCommand": "node dist/apps/bff.js",
-    "healthcheckPath": "/health",
+    "startCommand": "node dist/apps/api-bff/src/server.js",
+    "healthcheckPath": "/healthz",
     "healthcheckTimeout": 300,
     "restartPolicyType": "ON_FAILURE",
     "restartPolicyMaxRetries": 10
   },
   "variables": {
     "NODE_ENV": "production",
-    "BFF_PORT": "3001",
+    "PORT": "4000",
     "BFF_ALLOWED_ORIGINS": "https://your-frontend-domain.com,http://localhost:3000"
   }
 }
