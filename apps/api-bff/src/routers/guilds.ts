@@ -32,11 +32,18 @@ export const guildsRouter = router({
             }
 
             if (seasonId) {
-              const [guildSeasons, total] = await Promise.all([
-                prisma.guildSeason.findMany({
+              if (search) {
+                // OPTIMIZED: Use efficient database queries with proper indexing
+                // Step 1: Get search results with database filtering (much faster than loading all)
+                const searchResults = await prisma.guildSeason.findMany({
                   where: {
                     seasonId,
-                    ...(search ? { guild: whereClause } : {})
+                    guild: {
+                      name: {
+                        contains: search,
+                        mode: 'insensitive'
+                      }
+                    }
                   },
                   include: {
                     guild: true,
@@ -47,52 +54,163 @@ export const guildsRouter = router({
                       }
                     }
                   },
-                  skip: (page - 1) * pageSize,
-                  take: pageSize,
                   orderBy: field === 'mmr' ? { currentMmr: dir as 'asc' | 'desc' } :
                     field === 'name' ? { guild: { name: dir as 'asc' | 'desc' } } :
                       field === 'battles' ? { totalBattles: dir as 'asc' | 'desc' } :
                         { currentMmr: 'desc' }
-                }),
-                prisma.guildSeason.count({
-                  where: {
-                    seasonId,
-                    ...(search ? { guild: whereClause } : {})
-                  }
-                })
-              ]);
+                });
 
-              const data = guildSeasons.map((gs) => {
-                // Calculate average mass across all prime time windows
-                const avgMass = gs.primeTimeMasses.length > 0 
-                  ? gs.primeTimeMasses.reduce((sum, mass) => sum + mass.avgMass, 0) / gs.primeTimeMasses.length
-                  : 0;
+                // Step 2: Calculate ranks efficiently using a single count query per result
+                // This is much faster than loading all guilds into memory
+                const data = await Promise.all(
+                  searchResults.map(async (gs) => {
+                    // Calculate rank by counting guilds with better MMR
+                    let rank = 1;
+                    if (field === 'mmr') {
+                      const betterCount = dir === 'desc' 
+                        ? await prisma.guildSeason.count({
+                            where: {
+                              seasonId,
+                              currentMmr: { gt: gs.currentMmr }
+                            }
+                          })
+                        : await prisma.guildSeason.count({
+                            where: {
+                              seasonId,
+                              currentMmr: { lt: gs.currentMmr }
+                            }
+                          });
+                      rank = betterCount + 1;
+                    } else if (field === 'name') {
+                      const betterCount = dir === 'asc'
+                        ? await prisma.guildSeason.count({
+                            where: {
+                              seasonId,
+                              guild: {
+                                name: { lt: gs.guild.name }
+                              }
+                            }
+                          })
+                        : await prisma.guildSeason.count({
+                            where: {
+                              seasonId,
+                              guild: {
+                                name: { gt: gs.guild.name }
+                              }
+                            }
+                          });
+                      rank = betterCount + 1;
+                    } else if (field === 'battles') {
+                      const betterCount = dir === 'desc'
+                        ? await prisma.guildSeason.count({
+                            where: {
+                              seasonId,
+                              totalBattles: { gt: gs.totalBattles }
+                            }
+                          })
+                        : await prisma.guildSeason.count({
+                            where: {
+                              seasonId,
+                              totalBattles: { lt: gs.totalBattles }
+                            }
+                          });
+                      rank = betterCount + 1;
+                    }
 
-                return {
-                  id: gs.guild.id,
-                  name: gs.guild.name,
-                  currentMmr: gs.currentMmr,
-                  previousSeasonMmr: gs.previousSeasonMmr,
-                  carryoverMmr: gs.carryoverMmr,
-                  seasonEndMmr: gs.seasonEndMmr,
-                  totalBattles: gs.totalBattles,
-                  wins: gs.wins,
-                  losses: gs.losses,
-                  winRate: gs.totalBattles > 0 ? (gs.wins / gs.totalBattles * 100).toFixed(1) : '0.0',
-                  totalFameGained: gs.totalFameGained,
-                  totalFameLost: gs.totalFameLost,
-                  primeTimeBattles: gs.primeTimeBattles,
-                  avgMass: Math.round(avgMass * 10) / 10, // Round to 1 decimal place
-                  lastBattleAt: gs.lastBattleAt,
-                  season: {
-                    id: gs.season.id,
-                    name: gs.season.name,
-                    isActive: gs.season.isActive
-                  }
-                };
-              });
+                    // Calculate average mass across all prime time windows
+                    const avgMass = gs.primeTimeMasses.length > 0 
+                      ? gs.primeTimeMasses.reduce((sum, mass) => sum + mass.avgMass, 0) / gs.primeTimeMasses.length
+                      : 0;
 
-              return { data, page, pageSize, total, seasonId };
+                    return {
+                      id: gs.guild.id,
+                      name: gs.guild.name,
+                      currentMmr: gs.currentMmr,
+                      previousSeasonMmr: gs.previousSeasonMmr,
+                      carryoverMmr: gs.carryoverMmr,
+                      seasonEndMmr: gs.seasonEndMmr,
+                      totalBattles: gs.totalBattles,
+                      wins: gs.wins,
+                      losses: gs.losses,
+                      winRate: gs.totalBattles > 0 ? (gs.wins / gs.totalBattles * 100).toFixed(1) : '0.0',
+                      totalFameGained: gs.totalFameGained,
+                      totalFameLost: gs.totalFameLost,
+                      primeTimeBattles: gs.primeTimeBattles,
+                      avgMass: Math.round(avgMass * 10) / 10,
+                      lastBattleAt: gs.lastBattleAt,
+                      rank, // Actual rank calculated efficiently
+                      season: {
+                        id: gs.season.id,
+                        name: gs.season.name,
+                        isActive: gs.season.isActive
+                      }
+                    };
+                  })
+                );
+
+                // Step 3: Apply pagination to results
+                const total = data.length;
+                const paginatedData = data.slice((page - 1) * pageSize, page * pageSize);
+
+                return { data: paginatedData, page, pageSize, total, seasonId };
+              } else {
+                // For regular pagination: Use the original efficient approach
+                const [guildSeasons, total] = await Promise.all([
+                  prisma.guildSeason.findMany({
+                    where: { seasonId },
+                    include: {
+                      guild: true,
+                      season: true,
+                      primeTimeMasses: {
+                        include: {
+                          primeTimeWindow: true
+                        }
+                      }
+                    },
+                    skip: (page - 1) * pageSize,
+                    take: pageSize,
+                    orderBy: field === 'mmr' ? { currentMmr: dir as 'asc' | 'desc' } :
+                      field === 'name' ? { guild: { name: dir as 'asc' | 'desc' } } :
+                        field === 'battles' ? { totalBattles: dir as 'asc' | 'desc' } :
+                          { currentMmr: 'desc' }
+                  }),
+                  prisma.guildSeason.count({
+                    where: { seasonId }
+                  })
+                ]);
+
+                const data = guildSeasons.map((gs) => {
+                  // Calculate average mass across all prime time windows
+                  const avgMass = gs.primeTimeMasses.length > 0 
+                    ? gs.primeTimeMasses.reduce((sum, mass) => sum + mass.avgMass, 0) / gs.primeTimeMasses.length
+                    : 0;
+
+                  return {
+                    id: gs.guild.id,
+                    name: gs.guild.name,
+                    currentMmr: gs.currentMmr,
+                    previousSeasonMmr: gs.previousSeasonMmr,
+                    carryoverMmr: gs.carryoverMmr,
+                    seasonEndMmr: gs.seasonEndMmr,
+                    totalBattles: gs.totalBattles,
+                    wins: gs.wins,
+                    losses: gs.losses,
+                    winRate: gs.totalBattles > 0 ? (gs.wins / gs.totalBattles * 100).toFixed(1) : '0.0',
+                    totalFameGained: gs.totalFameGained,
+                    totalFameLost: gs.totalFameLost,
+                    primeTimeBattles: gs.primeTimeBattles,
+                    avgMass: Math.round(avgMass * 10) / 10,
+                    lastBattleAt: gs.lastBattleAt,
+                    season: {
+                      id: gs.season.id,
+                      name: gs.season.name,
+                      isActive: gs.season.isActive
+                    }
+                  };
+                });
+
+                return { data, page, pageSize, total, seasonId };
+              }
             } else {
               const [guilds, total] = await Promise.all([
                 prisma.guild.findMany({

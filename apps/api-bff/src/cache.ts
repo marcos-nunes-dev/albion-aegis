@@ -1,4 +1,5 @@
 import redis from '../../../src/queue/connection.js';
+import { config } from '../../../src/lib/config.js';
 
 export interface CacheOptions {
   ttl?: number; // Time to live in seconds, default 300 (5 minutes)
@@ -35,6 +36,12 @@ export class ApiCache {
    * Get cached data
    */
   async get<T>(prefix: string, ...keyParts: (string | number | object)[]): Promise<T | null> {
+    // Skip cache if disabled
+    if (config.DISABLE_CACHE) {
+      console.log(`🚫 Cache DISABLED: Skipping cache lookup`);
+      return null;
+    }
+
     try {
       const key = this.generateKey(prefix, ...keyParts);
       const cached = await redis.get(key);
@@ -86,6 +93,12 @@ export class ApiCache {
     options: CacheOptions = {},
     ...keyParts: (string | number | object)[]
   ): Promise<void> {
+    // Skip cache if disabled
+    if (config.DISABLE_CACHE) {
+      console.log(`🚫 Cache DISABLED: Skipping cache set`);
+      return;
+    }
+
     try {
       const key = this.generateKey(prefix, ...keyParts);
       const ttl = options.ttl || this.defaultTTL;
@@ -137,6 +150,12 @@ export class ApiCache {
     fetchFn: () => Promise<T>,
     options: CacheOptions = {}
   ): Promise<T> {
+    // If cache is disabled, just fetch fresh data
+    if (config.DISABLE_CACHE) {
+      console.log(`🚫 Cache DISABLED: Fetching fresh data`);
+      return await fetchFn();
+    }
+
     // Try to get from cache first
     const cached = await this.get<T>(keyPrefix, ...keyParts);
     if (cached !== null) {
@@ -155,6 +174,16 @@ export class ApiCache {
 
 // Create default cache instance
 export const apiCache = new ApiCache();
+
+// Development helper: Force disable cache
+if (config.NODE_ENV === 'development' && process.env.FORCE_DISABLE_CACHE === 'true') {
+  console.log('🚫 FORCE DISABLING CACHE for development');
+  // Override the getOrSet method to always fetch fresh data
+  apiCache.getOrSet = async (keyPrefix, keyParts, fetchFn, options) => {
+    console.log(`🚫 FORCE DISABLED: Fetching fresh data for ${keyPrefix}`);
+    return await fetchFn();
+  };
+}
 
 // Cache TTL constants (in seconds)
 export const CACHE_TTL = {

@@ -45,21 +45,49 @@ export const mmrFeedRouter = router({
               whereClause.seasonId = seasonId;
             }
             
+            // Check if search term is numeric (battle ID)
+            const isNumeric = searchTerm ? /^\d+$/.test(searchTerm.trim()) : false;
+            
             // Search by battle ID or guild name
             if (searchTerm) {
               const searchTermStr = searchTerm.trim();
-              
-              // Check if search term is numeric (battle ID)
-              const isNumeric = /^\d+$/.test(searchTermStr);
               
               if (isNumeric) {
                 // Search by battle ID
                 whereClause.battleId = BigInt(searchTermStr);
               } else {
-                // Search by guild name (case insensitive)
-                whereClause.guildName = {
-                  contains: searchTermStr,
-                  mode: 'insensitive'
+                // For guild name search, we need to find all battles where this guild participated
+                // First, find all battle IDs where this guild participated
+                const guildBattles = await prisma.mmrCalculationLog.findMany({
+                  where: {
+                    guildName: {
+                      contains: searchTermStr,
+                      mode: 'insensitive'
+                    },
+                    ...(seasonId ? { seasonId } : {})
+                  },
+                  select: {
+                    battleId: true
+                  },
+                  distinct: ['battleId']
+                });
+                
+                const battleIds = guildBattles.map(b => b.battleId);
+                
+                if (battleIds.length === 0) {
+                  // No battles found for this guild, return empty result
+                  return {
+                    data: [],
+                    page,
+                    pageSize,
+                    total: 0,
+                    totalBattles: 0
+                  };
+                }
+                
+                // Search for all guilds in these battles
+                whereClause.battleId = {
+                  in: battleIds
                 };
               }
             }
@@ -76,7 +104,14 @@ export const mmrFeedRouter = router({
                 skip: (page - 1) * pageSize,
                 take: pageSize,
               }),
-              prisma.mmrCalculationLog.count({ where: whereClause })
+              // For guild search, we need to count unique battles, not individual logs
+              searchTerm && !isNumeric ? 
+                prisma.mmrCalculationLog.findMany({
+                  where: whereClause,
+                  select: { battleId: true },
+                  distinct: ['battleId']
+                }).then(results => results.length) :
+                prisma.mmrCalculationLog.count({ where: whereClause })
             ]);
 
             // Group by battle
