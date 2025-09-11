@@ -179,7 +179,7 @@ export const apiCache = new ApiCache();
 if (config.NODE_ENV === 'development' && process.env.FORCE_DISABLE_CACHE === 'true') {
   console.log('🚫 FORCE DISABLING CACHE for development');
   // Override the getOrSet method to always fetch fresh data
-  apiCache.getOrSet = async (keyPrefix, keyParts, fetchFn, options) => {
+  apiCache.getOrSet = async (keyPrefix, _keyParts, fetchFn, _options) => {
     console.log(`🚫 FORCE DISABLED: Fetching fresh data for ${keyPrefix}`);
     return await fetchFn();
   };
