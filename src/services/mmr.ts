@@ -216,10 +216,28 @@ export class MmrService {
       // Apply anti-farming factor to reduce MMR gains for repeated wins against same opponents
       let antiFarmingFactor: number | undefined;
       if (isWin && finalMmrChange > 0) {
-        // Get opponent guilds from battle analysis
-        const opponentGuilds = battleAnalysis.guildStats
-          .filter(g => g.guildId !== guildStat.guildId)
-          .map(g => g.guildName);
+        // Get the guild's alliance
+        const guildAlliance = this.getGuildAlliance(guildStat.guildName, battleAnalysis);
+        
+        // Filter out allied guilds - only consider enemy guilds for anti-farming
+        const enemyGuilds = battleAnalysis.guildStats.filter(g => {
+          if (g.guildId === guildStat.guildId) return false; // Skip self
+          
+          // If no alliance data available, treat all other guilds as enemies
+          if (!battleAnalysis.guildAlliances || !guildAlliance) return true;
+          
+          // Get the other guild's alliance
+          const otherGuildAlliance = battleAnalysis.guildAlliances.get(g.guildName);
+          
+          // If the other guild has no alliance, treat as enemy
+          if (!otherGuildAlliance) return true;
+          
+          // Only consider as enemy if they're from different alliances
+          return otherGuildAlliance !== guildAlliance;
+        });
+        
+        // Get opponent guild names
+        const opponentGuilds = enemyGuilds.map(g => g.guildName);
 
         // Get current season ID
         const currentSeason = await this.getCurrentActiveSeason();
@@ -281,20 +299,48 @@ export class MmrService {
 
   /**
    * Calculate win/loss factor (-1 to 1)
+   * Now properly handles alliances - only considers enemy guilds for win/loss calculation
    */
   private calculateWinLossFactor(
     guildStat: GuildBattleStats,
     battleAnalysis: BattleAnalysis
   ): number {
-    const totalKills = battleAnalysis.guildStats.reduce(
-      (sum, g) => sum + g.kills,
-      0
-    );
-    const guildKillRatio = totalKills > 0 ? guildStat.kills / totalKills : 0;
+    // Get the guild's alliance
+    const guildAlliance = this.getGuildAlliance(guildStat.guildName, battleAnalysis);
+    
+    // Filter out allied guilds - only consider enemy guilds for win/loss calculation
+    const enemyGuilds = battleAnalysis.guildStats.filter(g => {
+      if (g.guildId === guildStat.guildId) return false; // Skip self
+      
+      // If no alliance data available, treat all other guilds as enemies
+      if (!battleAnalysis.guildAlliances || !guildAlliance) return true;
+      
+      // Get the other guild's alliance
+      const otherGuildAlliance = battleAnalysis.guildAlliances.get(g.guildName);
+      
+      // If the other guild has no alliance, treat as enemy
+      if (!otherGuildAlliance) return true;
+      
+      // Only consider as enemy if they're from different alliances
+      return otherGuildAlliance !== guildAlliance;
+    });
 
-    // Determine if guild won (had significant kills)
-    const isWinner = guildKillRatio > 0.3; // Guild won if they got >30% of kills
+    // Calculate total kills from enemy guilds only
+    const enemyTotalKills = enemyGuilds.reduce((sum, g) => sum + g.kills, 0);
+    const totalKills = guildStat.kills + enemyTotalKills;
+    
+    if (totalKills === 0) return 0; // No kills in battle
+    
+    const guildKillRatio = guildStat.kills / totalKills;
+
+    // Determine if guild won against enemies (had significant kills vs enemies)
+    const isWinner = guildKillRatio > 0.3; // Guild won if they got >30% of total kills
     const isLoser = guildStat.deaths > guildStat.kills * 2; // Guild lost if deaths > 2x kills
+
+    // If there are no enemies (all guilds are allies), return neutral
+    if (enemyGuilds.length === 0) {
+      return 0; // Neutral - no enemies to win/lose against
+    }
 
     if (isWinner) return 1;
     if (isLoser) return -1;
@@ -460,17 +506,36 @@ export class MmrService {
   /**
    * Calculate opponent strength factor (-1 to 1)
    * This factor heavily penalizes easy wins and rewards difficult wins
+   * Now properly handles alliances - only considers enemy guilds for opponent strength
    */
   private calculateOpponentStrengthFactor(
     guildStat: GuildBattleStats,
     battleAnalysis: BattleAnalysis
   ): number {
-    // Get all opponent MMRs
-    const opponentMmrs = battleAnalysis.guildStats
-      .filter((g) => g.guildId !== guildStat.guildId)
-      .map((g) => g.currentMmr);
+    // Get the guild's alliance
+    const guildAlliance = this.getGuildAlliance(guildStat.guildName, battleAnalysis);
+    
+    // Filter out allied guilds - only consider enemy guilds for opponent strength
+    const enemyGuilds = battleAnalysis.guildStats.filter(g => {
+      if (g.guildId === guildStat.guildId) return false; // Skip self
+      
+      // If no alliance data available, treat all other guilds as enemies
+      if (!battleAnalysis.guildAlliances || !guildAlliance) return true;
+      
+      // Get the other guild's alliance
+      const otherGuildAlliance = battleAnalysis.guildAlliances.get(g.guildName);
+      
+      // If the other guild has no alliance, treat as enemy
+      if (!otherGuildAlliance) return true;
+      
+      // Only consider as enemy if they're from different alliances
+      return otherGuildAlliance !== guildAlliance;
+    });
 
-    if (opponentMmrs.length === 0) return 0;
+    // Get enemy MMRs only
+    const opponentMmrs = enemyGuilds.map((g) => g.currentMmr);
+
+    if (opponentMmrs.length === 0) return 0; // No enemies, no opponent strength factor
 
     // Calculate average opponent MMR
     const avgOpponentMmr = opponentMmrs.reduce((sum, mmr) => sum + mmr, 0) / opponentMmrs.length;
@@ -1527,7 +1592,7 @@ export class MmrService {
   ): boolean {
     // Get alliance data from the battle analysis context
     // This should be passed from the battle data (alliancesJson or kills data)
-    const guildAlliance = this.getGuildAlliance(
+    const guildAlliance = MmrService.getGuildAllianceStatic(
       guildStat.guildName,
       battleAnalysis
     );
@@ -1540,7 +1605,7 @@ export class MmrService {
     >();
 
     for (const guild of battleAnalysis.guildStats) {
-      const allianceName = this.getGuildAlliance(
+      const allianceName = MmrService.getGuildAllianceStatic(
         guild.guildName,
         battleAnalysis
       );
@@ -1572,7 +1637,24 @@ export class MmrService {
    * Get guild's alliance from battle data
    * Uses actual alliance data from the battle context
    */
-  private static getGuildAlliance(
+  private getGuildAlliance(
+    guildName: string,
+    battleAnalysis: BattleAnalysis
+  ): string | null {
+    // Use the alliance mapping from battle analysis if available
+    if (battleAnalysis.guildAlliances) {
+      return battleAnalysis.guildAlliances.get(guildName) || null;
+    }
+
+    // Fallback: try to extract from kills data if available
+    // This would require passing kills data to the battle analysis
+    return null;
+  }
+
+  /**
+   * Static version of getGuildAlliance for use in static methods
+   */
+  private static getGuildAllianceStatic(
     guildName: string,
     battleAnalysis: BattleAnalysis
   ): string | null {
