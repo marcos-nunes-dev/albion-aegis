@@ -44,6 +44,7 @@
     "dev:setup": "powershell -ExecutionPolicy Bypass -File scripts/dev-setup.ps1",
     "dev:backfill": "tsx apps/backfill.ts",
     "mmr:test": "tsx apps/test-mmr-calculation.ts",
+    "manage-mmr": "tsx apps/manage-mmr.ts",
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev",
     "lint": "eslint src apps --ext .ts",

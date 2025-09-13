@@ -1166,9 +1166,7 @@ export class MmrService {
         .map((g) => g.currentMmr);
 
       // Get alliance information
-      const allianceName =
-        battleAnalysis.guildAlliances?.get(battleStats.guildName) ??
-        JSON.stringify(Object.fromEntries(battleAnalysis.guildAlliances ?? []));
+      const allianceName = battleAnalysis.guildAlliances?.get(battleStats.guildName) ?? null;
 
       // Check significant participation
       const hasSignificantParticipation =
