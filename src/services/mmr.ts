@@ -23,15 +23,20 @@ const MMR_CONSTANTS = {
   MIN_BATTLE_FAME: 2000000, // Minimum fame for MMR calculation (2M)
   SEASON_CARRYOVER_RATIO: 0.3, // 30% of previous season MMR carries over
   
-  // IMPROVED: Much stricter participation thresholds to filter out minimal participants
-  MIN_FAME_PARTICIPATION_RATIO: 0.10, // 10% of total battle fame for participation (increased from 2%)
-  MIN_KILLS_DEATHS_RATIO: 0.10, // 10% of total battle kills+deaths for participation (increased from 3%)
-  MIN_PLAYER_RATIO: 0.10, // 10% of total battle players for participation (increased from 3%)
+  // IMPROVED: More strict proportional participation thresholds
+  MIN_FAME_PARTICIPATION_RATIO: 0.15, // 15% of total battle fame for participation (increased from 10%)
+  MIN_KILLS_DEATHS_RATIO: 0.15, // 15% of total battle kills+deaths for participation (increased from 10%)
+  MIN_PLAYER_RATIO: 0.15, // 15% of total battle players for participation (increased from 10%)
   
-  // IMPROVED: Higher absolute thresholds for minimum participation
-  MIN_ABSOLUTE_FAME_PARTICIPATION: 500000, // Minimum 500K fame gained or lost (increased from 200K)
-  MIN_ABSOLUTE_KILLS_DEATHS: 5, // Minimum 5 kills OR deaths combined (increased from 2)
-  MIN_ABSOLUTE_PLAYERS: 3, // Minimum 3 players for significant participation (increased from 2)
+  // IMPROVED: More strict absolute thresholds
+  MIN_ABSOLUTE_FAME_PARTICIPATION: 1000000, // Minimum 1M fame gained or lost (increased from 500K)
+  MIN_ABSOLUTE_KILLS_DEATHS: 12, // Minimum 12 kills OR deaths combined (increased from 10)
+  MIN_ABSOLUTE_PLAYERS: 2, // Minimum 2 players for significant participation
+  
+  // NEW: Battle size scaling factors for participation thresholds
+  SMALL_BATTLE_THRESHOLD: 20, // Battles with 20 or fewer total kills+deaths are considered small
+  SMALL_BATTLE_KILLS_DEATHS_MULTIPLIER: 0.5, // Small battles get 50% of normal absolute threshold (increased from 30%)
+  SMALL_BATTLE_FAME_MULTIPLIER: 0.4, // Small battles get 40% of normal absolute fame threshold (increased from 20%)
   
   // Alliance participation bonus (guilds from same alliance get more lenient thresholds)
   ALLIANCE_PARTICIPATION_BONUS: 0.3, // 30% bonus for participating in major alliances (reduced from 50%)
@@ -102,8 +107,32 @@ export class MmrService {
 
       const mmrResults = new Map<string, { mmrChange: number; antiFarmingFactor?: number }>();
 
-      // Calculate base MMR changes for each guild
-      for (const guildStat of battleAnalysis.guildStats) {
+      // Filter guilds with significant participation before calculating MMR
+      const significantGuilds = battleAnalysis.guildStats.filter(guildStat => {
+        const hasSignificantParticipation = MmrService.hasSignificantParticipation(guildStat, battleAnalysis);
+        
+        if (!hasSignificantParticipation) {
+          logger.debug("Skipping MMR calculation for guild with insignificant participation", {
+            guildName: guildStat.guildName,
+            kills: guildStat.kills,
+            deaths: guildStat.deaths,
+            fameGained: guildStat.fameGained,
+            players: guildStat.players
+          });
+        }
+        
+        return hasSignificantParticipation;
+      });
+
+      logger.info("Filtered guilds for MMR calculation", {
+        battleId: battleAnalysis.battleId.toString(),
+        totalGuilds: battleAnalysis.guildStats.length,
+        significantGuilds: significantGuilds.length,
+        filteredOut: battleAnalysis.guildStats.length - significantGuilds.length
+      });
+
+      // Calculate base MMR changes for each significant guild
+      for (const guildStat of significantGuilds) {
         const result = await this.calculateGuildMmrChangeWithAntiFarming(
           guildStat,
           battleAnalysis
@@ -1506,19 +1535,45 @@ export class MmrService {
     const adjustedPlayerThreshold =
       MMR_CONSTANTS.MIN_PLAYER_RATIO * (1 - allianceBonus);
 
-    // IMPROVED: Check both relative and absolute participation criteria
+    // IMPROVED: Check both relative and absolute participation criteria with battle size scaling
+    const isSmallBattle = totalBattleKillsDeaths <= MMR_CONSTANTS.SMALL_BATTLE_THRESHOLD;
+    
+    // Adjust absolute thresholds based on battle size
+    const adjustedAbsoluteFameThreshold = isSmallBattle 
+      ? MMR_CONSTANTS.MIN_ABSOLUTE_FAME_PARTICIPATION * MMR_CONSTANTS.SMALL_BATTLE_FAME_MULTIPLIER
+      : MMR_CONSTANTS.MIN_ABSOLUTE_FAME_PARTICIPATION;
+    
+    const adjustedAbsoluteKillsDeathsThreshold = isSmallBattle
+      ? MMR_CONSTANTS.MIN_ABSOLUTE_KILLS_DEATHS * MMR_CONSTANTS.SMALL_BATTLE_KILLS_DEATHS_MULTIPLIER
+      : MMR_CONSTANTS.MIN_ABSOLUTE_KILLS_DEATHS;
+    
+    const adjustedAbsolutePlayerThreshold = isSmallBattle
+      ? MMR_CONSTANTS.MIN_ABSOLUTE_PLAYERS
+      : MMR_CONSTANTS.MIN_ABSOLUTE_PLAYERS;
+    
     const hasFameParticipation = fameRatio >= adjustedFameThreshold || 
-                                guildFameParticipation >= MMR_CONSTANTS.MIN_ABSOLUTE_FAME_PARTICIPATION;
+                                guildFameParticipation >= adjustedAbsoluteFameThreshold;
     const hasKillsDeathsParticipation = killsDeathsRatio >= adjustedKillsDeathsThreshold || 
-                                       guildKillsDeaths >= MMR_CONSTANTS.MIN_ABSOLUTE_KILLS_DEATHS;
+                                       guildKillsDeaths >= adjustedAbsoluteKillsDeathsThreshold;
+    // IMPROVED: More lenient player participation when player data is missing or unreliable
     const hasPlayerParticipation = playerRatio >= adjustedPlayerThreshold || 
-                                  guildStat.players >= MMR_CONSTANTS.MIN_ABSOLUTE_PLAYERS;
+                                  guildStat.players >= adjustedAbsolutePlayerThreshold ||
+                                  (guildStat.players === 0 && (guildStat.kills > 0 || guildStat.deaths > 0)); // Allow if no player data but has kills/deaths
 
-    // IMPROVED: Much stricter criteria for single-player guilds
-    // Single players must have very high participation to be included
+    // IMPROVED: Proportional criteria for single-player guilds based on battle size
     const isSinglePlayer = guildStat.players <= 1;
-    const hasSignificantKillsDeaths = guildKillsDeaths >= 8; // At least 8 kills OR deaths for single players (increased from 3)
-    const hasSignificantFame = guildFameParticipation >= 1000000; // At least 1M fame for single players (increased from 500K)
+    
+    // Scale single player thresholds based on battle size
+    const singlePlayerKillsDeathsThreshold = isSmallBattle 
+      ? Math.max(2, Math.ceil(totalBattleKillsDeaths * 0.2)) // 20% of total kills+deaths, minimum 2
+      : 8; // Large battles keep the original threshold
+    
+    const singlePlayerFameThreshold = isSmallBattle
+      ? Math.max(100000, totalBattleFame * 0.1) // 10% of total fame, minimum 100K
+      : 1000000; // Large battles keep the original threshold
+    
+    const hasSignificantKillsDeaths = guildKillsDeaths >= singlePlayerKillsDeathsThreshold;
+    const hasSignificantFame = guildFameParticipation >= singlePlayerFameThreshold;
     
     // IMPROVED: Guild must meet at least 2 out of 3 criteria, or be from a major alliance
     // Additionally, must have at least some meaningful participation (kills OR deaths)
@@ -1526,13 +1581,25 @@ export class MmrService {
     
     // For single players, require higher thresholds
     if (isSinglePlayer) {
-      const hasSignificantParticipationForSinglePlayer = 
-        hasAnyKillsOrDeaths && 
-        hasSignificantKillsDeaths && 
-        hasSignificantFame;
-      
-      // Even for major alliances, single players must meet strict criteria
-      return hasSignificantParticipationForSinglePlayer;
+      // IMPROVED: More lenient for single players when player data is missing
+      if (guildStat.players === 0) {
+        // If no player data, use regular participation logic instead of strict single player logic
+        const participationScore = [
+          hasFameParticipation,
+          hasKillsDeathsParticipation,
+          hasPlayerParticipation,
+        ].filter(Boolean).length;
+        
+        return participationScore >= 2 && hasAnyKillsOrDeaths;
+      } else {
+        // Original strict single player logic for actual single players
+        const hasSignificantParticipationForSinglePlayer = 
+          hasAnyKillsOrDeaths && 
+          hasSignificantKillsDeaths && 
+          hasSignificantFame;
+        
+        return hasSignificantParticipationForSinglePlayer;
+      }
     }
     
     const participationScore = [
