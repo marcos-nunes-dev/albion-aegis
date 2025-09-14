@@ -14,6 +14,7 @@
     "start:metrics": "tsx apps/metrics-http.ts",
     "start:api-bff": "tsx apps/api-bff/src/server.ts",
     "start:gap-recovery": "tsx apps/gap-recovery.ts",
+    "start:daily-gap-recovery": "tsx apps/daily-gap-recovery.ts",
     "start:sweep-hourly": "tsx apps/deep-sweep-hourly.ts",
     "start:sweep-nightly": "tsx apps/deep-sweep-nightly.ts",
     "tracking:add": "tsx apps/manage-tracking.ts add",

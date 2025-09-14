@@ -1,0 +1,41 @@
+# Use Node.js 20 Alpine for smaller image size
+FROM node:20-alpine
+
+# Set working directory
+WORKDIR /app
+
+# Install dependencies for building
+RUN apk add --no-cache python3 make g++
+
+# Copy package files
+COPY package*.json ./
+COPY yarn.lock ./
+
+# Install dependencies
+RUN yarn install --frozen-lockfile
+
+# Copy source code
+COPY . .
+
+# Generate Prisma client
+RUN yarn prisma:generate
+
+# Build the application
+RUN yarn build
+
+# Remove dev dependencies and source code to reduce image size
+RUN yarn install --production --frozen-lockfile && \
+    rm -rf src apps tsconfig.json
+
+# Create non-root user for security
+RUN addgroup -g 1001 -S nodejs && \
+    adduser -S nodejs -u 1001
+
+# Change ownership of the app directory
+RUN chown -R nodejs:nodejs /app
+
+# Switch to non-root user
+USER nodejs
+
+# Set the command to run the daily gap recovery service
+CMD ["node", "dist/apps/daily-gap-recovery.js"]

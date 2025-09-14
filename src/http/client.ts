@@ -261,9 +261,11 @@ async function rateLimitedRequest(url: string): Promise<any> {
  * @returns Promise<BattleListResponse>
  */
 export async function getBattlesPage(page: number, minPlayers: number): Promise<BattleListResponse> {
-  const url = `${config.API_BASE_URL}/battles?offset=${page}&limit=51&sort=recent&minPlayers=${minPlayers}`;
+  // Convert 0-based page to 1-based page for API
+  const apiPage = page + 1;
+  const url = `${config.API_BASE_URL}/battles?search&minPlayers=${minPlayers}&page=${apiPage}`;
   
-  httpLogger.info(`Fetching battles page ${page + 1} (min players: ${minPlayers})`);
+  httpLogger.info(`Fetching battles page ${apiPage} (min players: ${minPlayers})`);
   
   try {
     const data = await rateLimitedRequest(url);
@@ -274,7 +276,7 @@ export async function getBattlesPage(page: number, minPlayers: number): Promise<
       throw new ValidationError('Invalid battle list response format');
     }
     
-    httpLogger.info(`Successfully fetched ${battles.length} battles from page ${page + 1}`);
+    httpLogger.info(`Successfully fetched ${battles.length} battles from page ${apiPage}`);
     return battles;
     
   } catch (error) {
