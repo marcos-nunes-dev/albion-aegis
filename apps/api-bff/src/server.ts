@@ -131,6 +131,10 @@ const server = createServer(async (req, res) => {
               result = await caller.guilds.list(params.input);
             } else if (procedureName === 'topAllTime') {
               result = await caller.guilds.topAllTime(params.input);
+            } else if (procedureName === 'topLastSeason') {
+              result = await caller.guilds.topLastSeason(params.input);
+            } else if (procedureName === 'topCurrentSeason') {
+              result = await caller.guilds.topCurrentSeason(params.input);
             } else if (procedureName === 'getPrimeTimeMass') {
               result = await caller.guilds.getPrimeTimeMass(params.input);
             }

@@ -369,6 +369,226 @@ export const guildsRouter = router({
       }
     }),
 
+  // Get top last season guilds with enhanced data
+  topLastSeason: publicProc
+    .input(z.object({
+      limit: z.number().min(1).max(100).default(3)
+    }))
+    .query(async ({ input }) => {
+      const { limit } = input;
+      
+      try {
+        return await apiCache.getOrSet(
+          'guilds',
+          ['topLastSeason', input],
+          async () => {
+            // Get the last completed season (not the current active one)
+            const lastSeason = await prisma.season.findFirst({
+              where: { isActive: false },
+              orderBy: { endDate: 'desc' }
+            });
+
+            if (!lastSeason) {
+              throw new Error('No last season found');
+            }
+
+            // Get top guilds for the last season
+            const topGuilds = await prisma.guildSeason.findMany({
+              where: { seasonId: lastSeason.id },
+              include: {
+                guild: true,
+                season: true,
+                primeTimeMasses: {
+                  include: {
+                    primeTimeWindow: true
+                  }
+                }
+              },
+              orderBy: { currentMmr: 'desc' },
+              take: limit
+            });
+
+            // Fetch additional guild data from Albion API
+            const fetchGuildData = async (guildId: string): Promise<{
+              FounderName?: string;
+              MemberCount?: number;
+              killFame?: number;
+              DeathFame?: number;
+            } | null> => {
+              try {
+                const response = await fetch(`https://gameinfo.albiononline.com/api/gameinfo/guilds/${guildId}`);
+                if (response.ok) {
+                  const data = await response.json() as {
+                    FounderName?: string;
+                    MemberCount?: number;
+                    killFame?: number;
+                    DeathFame?: number;
+                  };
+                  return data;
+                }
+              } catch (error) {
+                console.error(`Failed to fetch guild data for ${guildId}:`, error);
+              }
+              return null;
+            };
+
+            // Process guilds and fetch additional data
+            const enhancedGuilds = await Promise.all(
+              topGuilds.map(async (gs, index) => {
+                // Calculate average mass across all prime time windows
+                const avgMass = gs.primeTimeMasses.length > 0 
+                  ? gs.primeTimeMasses.reduce((sum, mass) => sum + mass.avgMass, 0) / gs.primeTimeMasses.length
+                  : 0;
+
+                // Fetch additional guild data
+                const albionData = await fetchGuildData(gs.guild.id);
+
+                return {
+                  rank: index + 1,
+                  id: gs.guild.id,
+                  name: gs.guild.name,
+                  currentMmr: gs.currentMmr,
+                  totalBattles: gs.totalBattles,
+                  wins: gs.wins,
+                  losses: gs.losses,
+                  winRate: gs.totalBattles > 0 ? (gs.wins / gs.totalBattles * 100).toFixed(1) : '0.0',
+                  avgMass: Math.round(avgMass * 10) / 10,
+                  season: {
+                    id: gs.season.id,
+                    name: gs.season.name,
+                    isActive: gs.season.isActive
+                  },
+                  // Additional Albion API data
+                  founderName: albionData?.FounderName || 'Unknown',
+                  memberCount: albionData?.MemberCount || 0,
+                  killFame: albionData?.killFame || 0,
+                  deathFame: albionData?.DeathFame || 0
+                };
+              })
+            );
+
+            return enhancedGuilds;
+          },
+          { ttl: CACHE_TTL.GUILDS_TOP }
+        );
+      } catch (error) {
+        console.error('Error fetching top last season guilds:', error);
+        throw new Error('Failed to fetch top last season guilds');
+      }
+    }),
+
+  // Get top current season guilds with enhanced data (like topAllTime but for current season)
+  topCurrentSeason: publicProc
+    .input(z.object({
+      limit: z.number().min(1).max(100).default(3),
+      seasonId: z.string().optional()
+    }))
+    .query(async ({ input }) => {
+      const { limit, seasonId } = input;
+      
+      try {
+        return await apiCache.getOrSet(
+          'guilds',
+          ['topCurrentSeason', input],
+          async () => {
+            // Get the active season if no seasonId provided
+            let targetSeasonId = seasonId;
+            if (!targetSeasonId) {
+              const activeSeason = await prisma.season.findFirst({
+                where: { isActive: true },
+                orderBy: { startDate: 'desc' }
+              });
+              if (!activeSeason) {
+                throw new Error('No active season found');
+              }
+              targetSeasonId = activeSeason.id;
+            }
+
+            // Get top guilds for the current season
+            const topGuilds = await prisma.guildSeason.findMany({
+              where: { seasonId: targetSeasonId },
+              include: {
+                guild: true,
+                season: true,
+                primeTimeMasses: {
+                  include: {
+                    primeTimeWindow: true
+                  }
+                }
+              },
+              orderBy: { currentMmr: 'desc' },
+              take: limit
+            });
+
+            // Fetch additional guild data from Albion API
+            const fetchGuildData = async (guildId: string): Promise<{
+              FounderName?: string;
+              MemberCount?: number;
+              killFame?: number;
+              DeathFame?: number;
+            } | null> => {
+              try {
+                const response = await fetch(`https://gameinfo.albiononline.com/api/gameinfo/guilds/${guildId}`);
+                if (response.ok) {
+                  const data = await response.json() as {
+                    FounderName?: string;
+                    MemberCount?: number;
+                    killFame?: number;
+                    DeathFame?: number;
+                  };
+                  return data;
+                }
+              } catch (error) {
+                console.error(`Failed to fetch guild data for ${guildId}:`, error);
+              }
+              return null;
+            };
+
+            // Process guilds and fetch additional data
+            const enhancedGuilds = await Promise.all(
+              topGuilds.map(async (gs, index) => {
+                // Calculate average mass across all prime time windows
+                const avgMass = gs.primeTimeMasses.length > 0 
+                  ? gs.primeTimeMasses.reduce((sum, mass) => sum + mass.avgMass, 0) / gs.primeTimeMasses.length
+                  : 0;
+
+                // Fetch additional guild data
+                const albionData = await fetchGuildData(gs.guild.id);
+
+                return {
+                  rank: index + 1,
+                  id: gs.guild.id,
+                  name: gs.guild.name,
+                  currentMmr: gs.currentMmr,
+                  totalBattles: gs.totalBattles,
+                  wins: gs.wins,
+                  losses: gs.losses,
+                  winRate: gs.totalBattles > 0 ? (gs.wins / gs.totalBattles * 100).toFixed(1) : '0.0',
+                  avgMass: Math.round(avgMass * 10) / 10,
+                  season: {
+                    id: gs.season.id,
+                    name: gs.season.name,
+                    isActive: gs.season.isActive
+                  },
+                  // Additional Albion API data
+                  founderName: albionData?.FounderName || 'Unknown',
+                  memberCount: albionData?.MemberCount || 0,
+                  killFame: albionData?.killFame || 0,
+                  deathFame: albionData?.DeathFame || 0
+                };
+              })
+            );
+
+            return enhancedGuilds;
+          },
+          { ttl: CACHE_TTL.GUILDS_TOP }
+        );
+      } catch (error) {
+        console.error('Error fetching top current season guilds:', error);
+        throw new Error('Failed to fetch top current season guilds');
+      }
+    }),
+
   // Get prime time mass data for a specific guild
   getPrimeTimeMass: publicProc
     .input(z.object({

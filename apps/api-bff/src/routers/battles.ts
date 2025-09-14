@@ -7,14 +7,15 @@ const HeadToHeadInput = z.object({
   guild1Id: z.string(),
   guild2Id: z.string(),
   seasonId: z.string().optional(),
-  limit: z.number().min(1).max(100).default(1000),
+  limit: z.number().min(1).optional(), // Optional limit, no maximum restriction
 });
 
 export const battlesRouter = router({
   headToHead: publicProc
     .input(HeadToHeadInput)
-    .query(async ({ input }) => {
-      const { guild1Id, guild2Id, seasonId, limit } = input;
+        .query(async ({ input }) => {
+          const { guild1Id, guild2Id, seasonId, limit } = input;
+          console.log('🎯 Backend received seasonId:', seasonId);
       
       try {
         // Temporarily disabled cache - executing query directly
@@ -32,108 +33,136 @@ export const battlesRouter = router({
               throw new Error('One or both guilds not found');
             }
 
-            // Note: Using raw SQL instead of Prisma JSON queries for better PostgreSQL JSONB support
+            // Query MMR calculation logs to find battles where both guilds had significant participation
+            // This ensures we only get meaningful battles, not just any battle where both guilds were present
+            
+            // Get MMR calculation logs for both guilds
+            const whereClause = {
+              hasSignificantParticipation: true as const,
+              ...(seasonId && { seasonId })
+            };
 
-            // Get season data if provided
-            let season = null;
-            if (seasonId) {
-              season = await prisma.season.findUnique({
-                where: { id: seasonId }
-              });
-            }
+            const [guild1Logs, guild2Logs] = await Promise.all([
+              prisma.mmrCalculationLog.findMany({
+                where: {
+                  guildId: guild1Id,
+                  ...whereClause
+                },
+                orderBy: { battleId: 'desc' }
+              }),
+              prisma.mmrCalculationLog.findMany({
+                where: {
+                  guildId: guild2Id,
+                  ...whereClause
+                },
+                orderBy: { battleId: 'desc' }
+              })
+            ]);
 
-            // Get battles with both guilds using raw SQL for better JSON query support
-            let battles;
-            if (seasonId && season) {
-              battles = await prisma.$queryRawUnsafe(`
-                SELECT "albionId", "startedAt", "totalFame", "totalKills", "totalPlayers", "guildsJson", "alliancesJson"
-                FROM "Battle"
-                WHERE "guildsJson"::jsonb @> $1::jsonb
-                AND "guildsJson"::jsonb @> $2::jsonb
-                AND "startedAt" >= $3
-                AND "startedAt" <= $4
-                ORDER BY "startedAt" DESC
-                LIMIT $5
-              `, 
-                JSON.stringify([{name: guild1.name}]),
-                JSON.stringify([{name: guild2.name}]),
-                season.startDate,
-                season.endDate || new Date(),
-                limit
-              );
-            } else {
-              battles = await prisma.$queryRawUnsafe(`
-                SELECT "albionId", "startedAt", "totalFame", "totalKills", "totalPlayers", "guildsJson", "alliancesJson"
-                FROM "Battle"
-                WHERE "guildsJson"::jsonb @> $1::jsonb
-                AND "guildsJson"::jsonb @> $2::jsonb
-                ORDER BY "startedAt" DESC
-                LIMIT $3
-              `,
-                JSON.stringify([{name: guild1.name}]),
-                JSON.stringify([{name: guild2.name}]),
-                limit
-              );
-            }
+            // Find battle IDs where both guilds have significant participation
+            const guild1BattleIds = new Set(guild1Logs.map(log => log.battleId.toString()));
+            const guild2BattleIds = new Set(guild2Logs.map(log => log.battleId.toString()));
+            const commonBattleIds = Array.from(guild1BattleIds).filter(id => guild2BattleIds.has(id));
 
-            // Process battles to extract guild-specific data and calculate duration
-            const processedBattles = await Promise.all((battles as any[]).map(async (battle: any) => {
-              const guildsData = battle.guildsJson as Array<{
-                name: string;
-                kills?: number;
-                deaths?: number;
-              }>;
-              const guild1Data = guildsData.find(g => g.name === guild1.name);
-              const guild2Data = guildsData.find(g => g.name === guild2.name);
-
-              // Determine winner based on kills - only count clear wins, not draws
-              const guild1Kills = guild1Data?.kills || 0;
-              const guild2Kills = guild2Data?.kills || 0;
-              const winner = guild1Kills > guild2Kills ? guild1.name : 
-                           guild2Kills > guild1Kills ? guild2.name : 'Draw';
-
-              // Calculate duration based on first and last kill
-              let duration = 'Unknown';
-              try {
-                const killEvents = await prisma.killEvent.findMany({
-                  where: { battleAlbionId: battle.albionId },
-                  orderBy: { TimeStamp: 'asc' },
-                  select: { TimeStamp: true }
-                });
-
-                if (killEvents.length > 0) {
-                  const firstKill = killEvents[0].TimeStamp;
-                  const lastKill = killEvents[killEvents.length - 1].TimeStamp;
-                  const durationMs = lastKill.getTime() - firstKill.getTime();
-                  const durationMinutes = Math.round(durationMs / (1000 * 60));
-                  duration = `${durationMinutes} minutes`;
+            if (commonBattleIds.length === 0) {
+              return {
+                totalBattles: 0,
+                guild1Wins: 0,
+                guild2Wins: 0,
+                draws: 0,
+                battles: [],
+                guild1: {
+                  id: guild1.id,
+                  name: guild1.name
+                },
+                guild2: {
+                  id: guild2.id,
+                  name: guild2.name
                 }
-              } catch (error) {
-                console.warn('Could not calculate duration for battle', battle.albionId, error);
+              };
+            }
+
+            // Apply limit only if provided, otherwise return ALL battles
+            const battleIdsToProcess = limit ? commonBattleIds.slice(0, limit) : commonBattleIds;
+
+            // Filter logs to only include the battles we're processing
+            const filteredGuild1Logs = guild1Logs.filter(log => battleIdsToProcess.includes(log.battleId.toString()));
+            const filteredGuild2Logs = guild2Logs.filter(log => battleIdsToProcess.includes(log.battleId.toString()));
+
+            // Create a map of battle data
+            const guild1LogsMap = new Map(filteredGuild1Logs.map(log => [log.battleId.toString(), log]));
+            const guild2LogsMap = new Map(filteredGuild2Logs.map(log => [log.battleId.toString(), log]));
+
+            // Process battles to create the response
+            const processedBattles = battleIdsToProcess.map((battleId: string) => {
+              const guild1Log = guild1LogsMap.get(battleId.toString());
+              const guild2Log = guild2LogsMap.get(battleId.toString());
+
+              if (!guild1Log || !guild2Log) {
+                return null; // Skip if we don't have logs for both guilds
+              }
+
+              // Determine winner based on isWin field from MMR logs
+              let winner = 'Draw';
+              if (guild1Log.isWin && !guild2Log.isWin) {
+                winner = guild1.name;
+              } else if (guild2Log.isWin && !guild1Log.isWin) {
+                winner = guild2.name;
               }
 
               return {
-                id: battle.albionId.toString(),
-                date: battle.startedAt.toISOString(),
+                id: battleId,
+                date: guild1Log.processedAt.toISOString(),
                 guild1: guild1.name,
                 guild2: guild2.name,
-                guild1Score: guild1Kills,
-                guild2Score: guild2Kills,
+                guild1Score: guild1Log.kills,
+                guild2Score: guild2Log.kills,
                 winner,
-                duration,
-                participants: battle.totalPlayers,
-                totalFame: battle.totalFame,
-                totalKills: battle.totalKills,
-                detailsUrl: `https://albionbb.com/battles/${battle.albionId.toString()}`
+                duration: guild1Log.battleDuration ? `${guild1Log.battleDuration} minutes` : 'Unknown',
+                participants: guild1Log.totalBattlePlayers,
+                totalFame: guild1Log.totalBattleFame,
+                totalKills: guild1Log.kills + guild2Log.kills,
+                detailsUrl: `https://albionbb.com/battles/${battleId}`,
+                // Additional MMR data for more context
+                guild1MmrChange: guild1Log.mmrChange,
+                guild2MmrChange: guild2Log.mmrChange,
+                guild1Mmr: guild1Log.newMmr,
+                guild2Mmr: guild2Log.newMmr,
+                isPrimeTime: guild1Log.isPrimeTime
               };
-            }));
+            }).filter(battle => battle !== null);
 
-            // Calculate head-to-head statistics - only count clear wins, not draws
+            // Calculate head-to-head statistics
             const guild1Wins = processedBattles.filter((b: any) => b.winner === guild1.name).length;
             const guild2Wins = processedBattles.filter((b: any) => b.winner === guild2.name).length;
             const draws = processedBattles.filter((b: any) => b.winner === 'Draw').length;
 
-            return {
+            // Get current MMR values for the selected season
+            let guild1Season = null;
+            let guild2Season = null;
+            
+            if (seasonId) {
+              [guild1Season, guild2Season] = await Promise.all([
+                prisma.guildSeason.findUnique({
+                  where: {
+                    guildId_seasonId: {
+                      guildId: guild1Id,
+                      seasonId: seasonId
+                    }
+                  }
+                }),
+                prisma.guildSeason.findUnique({
+                  where: {
+                    guildId_seasonId: {
+                      guildId: guild2Id,
+                      seasonId: seasonId
+                    }
+                  }
+                })
+              ]);
+            }
+
+            const result = {
               totalBattles: processedBattles.length,
               guild1Wins,
               guild2Wins,
@@ -141,13 +170,24 @@ export const battlesRouter = router({
               battles: processedBattles,
               guild1: {
                 id: guild1.id,
-                name: guild1.name
+                name: guild1.name,
+                currentMmr: guild1Season?.currentMmr || 1000.0
               },
               guild2: {
                 id: guild2.id,
-                name: guild2.name
+                name: guild2.name,
+                currentMmr: guild2Season?.currentMmr || 1000.0
               }
             };
+            
+            console.log('🎯 Backend returning for season', seasonId, ':', {
+              guild1Mmr: result.guild1.currentMmr,
+              guild2Mmr: result.guild2.currentMmr,
+              guild1Season: guild1Season?.currentMmr,
+              guild2Season: guild2Season?.currentMmr
+            });
+            
+            return result;
         //   },
         //   { ttl: 30 } // Short TTL to avoid long-term caching issues
         // );
