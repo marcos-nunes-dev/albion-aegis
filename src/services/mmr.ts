@@ -8,16 +8,16 @@ const logger = log.child({ component: "mmr-service" });
 const MMR_CONSTANTS = {
   BASE_MMR: 1000.0,
   K_FACTOR: 32, // How much MMR can change in a single battle
-  WIN_LOSS_WEIGHT: 0.35, // 35% weight for win/loss (reduced from 40%)
-  FAME_WEIGHT: 0.15, // 15% weight for fame differential (reduced from 20%)
-  PLAYER_COUNT_WEIGHT: 0.25, // 25% weight for player count advantage (increased from 10%)
-  IP_WEIGHT: 0.05, // 5% weight for IP level differences (reduced from 10%)
-  BATTLE_SIZE_WEIGHT: 0.05, // 5% weight for battle size
-  KD_RATIO_WEIGHT: 0.05, // 5% weight for kill/death ratio
-  BATTLE_DURATION_WEIGHT: 0.03, // 3% weight for battle duration (reduced from 5%)
-  KILL_CLUSTERING_WEIGHT: 0.02, // 2% weight for kill clustering (reduced from 5%)
-  OPPONENT_MMR_WEIGHT: 0.15, // 15% weight for opponent MMR strength (reduced from 20%)
-  INDIVIDUAL_PERFORMANCE_WEIGHT: 0.05, // 5% weight for individual guild performance within alliance (reduced from 15%)
+  WIN_LOSS_WEIGHT: 0.30, // 30% weight for win/loss (reduced from 35%)
+  FAME_WEIGHT: 0.13, // 13% weight for fame differential (reduced from 15%)
+  PLAYER_COUNT_WEIGHT: 0.22, // 22% weight for player count advantage (reduced from 25%)
+  IP_WEIGHT: 0.04, // 4% weight for IP level differences (reduced from 5%)
+  BATTLE_SIZE_WEIGHT: 0.04, // 4% weight for battle size (reduced from 5%)
+  KD_RATIO_WEIGHT: 0.04, // 4% weight for kill/death ratio (reduced from 5%)
+  BATTLE_DURATION_WEIGHT: 0.03, // 3% weight for battle duration
+  KILL_CLUSTERING_WEIGHT: 0.02, // 2% weight for kill clustering
+  OPPONENT_MMR_WEIGHT: 0.13, // 13% weight for opponent MMR strength (reduced from 15%)
+  INDIVIDUAL_PERFORMANCE_WEIGHT: 0.05, // 5% weight for individual guild performance within alliance
   FRIEND_DETECTION_THRESHOLD: 0.1, // 10% of total kills to consider as friend
   MIN_BATTLE_SIZE: 25, // Minimum players for MMR calculation
   MIN_BATTLE_FAME: 2000000, // Minimum fame for MMR calculation (2M)
@@ -51,7 +51,6 @@ const MMR_CONSTANTS = {
   PLAYER_COUNT_BONUS_THRESHOLD: 0.7, // 30% fewer players triggers bonus
   OPPONENT_MMR_DIFFERENCE_THRESHOLD: 100, // 100 MMR difference for significant impact
   MAX_MMR_GAIN_FOR_EASY_WIN: 25, // Maximum points for easy wins (increased to allow difficult wins)
-  MIN_MMR_LOSS_FOR_LOSS: 8, // Minimum points lost for losses
   ANTI_FARMING_SEASON_LOOKBACK_DAYS: 30, // Look back 30 days for anti-farming
   ANTI_FARMING_WIN_THRESHOLD: 3, // Wins against an opponent before reduction
   ANTI_FARMING_MAX_WINS: 10, // Maximum wins against an opponent before full reduction
@@ -61,6 +60,12 @@ const MMR_CONSTANTS = {
   IP_FARMING_OPPONENT_THRESHOLD: 0.6, // If 60%+ of opponents have low IP, trigger farming penalty
   IP_FARMING_MAX_MMR_GAIN: 5, // Maximum MMR gain when IP farming is detected
   IP_FARMING_PENALTY_MULTIPLIER: 0.3, // Reduce MMR gain to 30% when farming detected
+  
+  // MMR Convergence and Decay System (prevents infinite scaling)
+  MMR_DECAY_RATE: 0.01, // 1% MMR decay per day of inactivity
+  MMR_CONVERGENCE_FACTOR: 0.95, // K-factor reduces by 5% for every 100 MMR above baseline
+  MMR_DECAY_THRESHOLD: 3, // Start decay after 3 days of inactivity
+  MAX_MMR_ABOVE_BASELINE: 500, // Maximum MMR above baseline (1500 total)
 } as const;
 
 export interface GuildBattleStats {
@@ -171,12 +176,15 @@ export class MmrService {
     // Calculate player count scaling factor
     const playerCountScalingFactor = this.calculatePlayerCountScalingFactor(guildStat);
 
+    // Calculate dynamic K-factor based on current MMR (prevents infinite scaling)
+    const dynamicKFactor = this.calculateDynamicKFactor(guildStat.currentMmr);
+
     // Calculate final MMR change (without anti-farming for now)
     let finalMmrChange = Math.max(
-      -MMR_CONSTANTS.K_FACTOR,
+      -dynamicKFactor,
       Math.min(
-        MMR_CONSTANTS.K_FACTOR,
-        totalWeightedScore * MMR_CONSTANTS.K_FACTOR * playerCountScalingFactor
+        dynamicKFactor,
+        totalWeightedScore * dynamicKFactor * playerCountScalingFactor
       )
     );
 
@@ -366,12 +374,15 @@ export class MmrService {
       // IMPROVED: Apply proportional scaling based on player count
       const playerCountScalingFactor = this.calculatePlayerCountScalingFactor(guildStat);
       
+      // Calculate dynamic K-factor based on current MMR (prevents infinite scaling)
+      const dynamicKFactor = this.calculateDynamicKFactor(guildStat.currentMmr);
+      
       // Apply K-factor and ensure reasonable bounds
       let finalMmrChange = Math.max(
-        -MMR_CONSTANTS.K_FACTOR,
+        -dynamicKFactor,
         Math.min(
-          MMR_CONSTANTS.K_FACTOR,
-          totalMmrChange * MMR_CONSTANTS.K_FACTOR * playerCountScalingFactor
+          dynamicKFactor,
+          totalMmrChange * dynamicKFactor * playerCountScalingFactor
         )
       );
 
@@ -873,6 +884,93 @@ export class MmrService {
     }
     
     return Math.max(-1, Math.min(1, factor));
+  }
+
+  /**
+   * Apply MMR decay for inactive guilds to prevent infinite scaling
+   * Guilds that don't fight for extended periods lose MMR gradually
+   */
+  private async applyMmrDecay(guildStat: GuildBattleStats): Promise<number> {
+    try {
+      const currentSeason = await this.getCurrentActiveSeason();
+      if (!currentSeason) return guildStat.currentMmr;
+
+      // Get the last battle for this guild in this season
+      const lastBattle = await this.prisma.mmrCalculationLog.findFirst({
+        where: {
+          guildId: guildStat.guildId,
+          seasonId: currentSeason.id
+        },
+        orderBy: {
+          processedAt: 'desc'
+        },
+        select: {
+          processedAt: true
+        }
+      });
+
+      if (!lastBattle) return guildStat.currentMmr; // No previous battles, no decay
+
+      // Calculate days since last battle
+      const daysSinceLastBattle = Math.floor(
+        (Date.now() - lastBattle.processedAt.getTime()) / (1000 * 60 * 60 * 24)
+      );
+
+      if (daysSinceLastBattle < MMR_CONSTANTS.MMR_DECAY_THRESHOLD) {
+        return guildStat.currentMmr; // No decay yet
+      }
+
+      // Apply decay: lose 1% MMR per day of inactivity
+      const decayDays = daysSinceLastBattle - MMR_CONSTANTS.MMR_DECAY_THRESHOLD;
+      const decayFactor = Math.pow(1 - MMR_CONSTANTS.MMR_DECAY_RATE, decayDays);
+      
+      // Only apply decay to MMR above baseline
+      const baselineMmr = MMR_CONSTANTS.BASE_MMR;
+      const mmrAboveBaseline = Math.max(0, guildStat.currentMmr - baselineMmr);
+      const decayedMmrAboveBaseline = mmrAboveBaseline * decayFactor;
+      
+      const newMmr = baselineMmr + decayedMmrAboveBaseline;
+
+      logger.debug('Applied MMR decay', {
+        guildId: guildStat.guildId,
+        guildName: guildStat.guildName,
+        daysSinceLastBattle,
+        originalMmr: guildStat.currentMmr,
+        newMmr,
+        decayFactor
+      });
+
+      return newMmr;
+    } catch (error) {
+      logger.error('Error applying MMR decay', {
+        guildId: guildStat.guildId,
+        error: error instanceof Error ? error.message : 'Unknown error'
+      });
+      return guildStat.currentMmr; // No decay on error
+    }
+  }
+
+  /**
+   * Calculate dynamic K-factor based on current MMR to prevent infinite scaling
+   * Higher MMR guilds get smaller K-factors, creating natural convergence
+   */
+  private calculateDynamicKFactor(currentMmr: number): number {
+    const baselineMmr = MMR_CONSTANTS.BASE_MMR; // 1000
+    const mmrAboveBaseline = Math.max(0, currentMmr - baselineMmr);
+    
+    // Calculate convergence factor: K-factor reduces as MMR gets higher
+    const convergenceReduction = Math.pow(
+      MMR_CONSTANTS.MMR_CONVERGENCE_FACTOR, 
+      mmrAboveBaseline / 100 // 5% reduction per 100 MMR above baseline
+    );
+    
+    // Apply convergence to base K-factor
+    const dynamicKFactor = MMR_CONSTANTS.K_FACTOR * convergenceReduction;
+    
+    // Ensure minimum K-factor (never goes below 25% of original)
+    const minKFactor = MMR_CONSTANTS.K_FACTOR * 0.25;
+    
+    return Math.max(minKFactor, dynamicKFactor);
   }
 
   /**
