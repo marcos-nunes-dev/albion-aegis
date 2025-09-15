@@ -117,9 +117,10 @@ export const guildsRouter = router({
                       rank = betterCount + 1;
                     }
 
-                    // Calculate average mass across all prime time windows
-                    const avgMass = gs.primeTimeMasses.length > 0 
-                      ? gs.primeTimeMasses.reduce((sum, mass) => sum + mass.avgMass, 0) / gs.primeTimeMasses.length
+                    // Calculate average mass across prime time windows where guild actually participated
+                    const participatedWindows = gs.primeTimeMasses.filter(mass => mass.battleCount > 0);
+                    const avgMass = participatedWindows.length > 0 
+                      ? participatedWindows.reduce((sum, mass) => sum + mass.avgMass, 0) / participatedWindows.length
                       : 0;
 
                     return {
@@ -189,9 +190,10 @@ export const guildsRouter = router({
                 ]);
 
                 const data = guildSeasons.map((gs) => {
-                  // Calculate average mass across all prime time windows
-                  const avgMass = gs.primeTimeMasses.length > 0 
-                    ? gs.primeTimeMasses.reduce((sum, mass) => sum + mass.avgMass, 0) / gs.primeTimeMasses.length
+                  // Calculate average mass across prime time windows where guild actually participated
+                  const participatedWindows = gs.primeTimeMasses.filter(mass => mass.battleCount > 0);
+                  const avgMass = participatedWindows.length > 0 
+                    ? participatedWindows.reduce((sum, mass) => sum + mass.avgMass, 0) / participatedWindows.length
                     : 0;
 
                   return {
@@ -347,9 +349,10 @@ export const guildsRouter = router({
             for (const gs of topGuilds) {
               const guildId = gs.guild.id;
               if (!guildMap.has(guildId) || gs.currentMmr > guildMap.get(guildId).currentMmr) {
-                // Calculate average mass across all prime time windows
-                const avgMass = gs.primeTimeMasses.length > 0 
-                  ? gs.primeTimeMasses.reduce((sum, mass) => sum + mass.avgMass, 0) / gs.primeTimeMasses.length
+                // Calculate average mass across prime time windows where guild actually participated
+                const participatedWindows = gs.primeTimeMasses.filter(mass => mass.battleCount > 0);
+                const avgMass = participatedWindows.length > 0 
+                  ? participatedWindows.reduce((sum, mass) => sum + mass.avgMass, 0) / participatedWindows.length
                   : 0;
 
                 // Fetch additional guild data
@@ -473,9 +476,10 @@ export const guildsRouter = router({
             // Process guilds and fetch additional data
             const enhancedGuilds = await Promise.all(
               topGuilds.map(async (gs, index) => {
-                // Calculate average mass across all prime time windows
-                const avgMass = gs.primeTimeMasses.length > 0 
-                  ? gs.primeTimeMasses.reduce((sum, mass) => sum + mass.avgMass, 0) / gs.primeTimeMasses.length
+                // Calculate average mass across prime time windows where guild actually participated
+                const participatedWindows = gs.primeTimeMasses.filter(mass => mass.battleCount > 0);
+                const avgMass = participatedWindows.length > 0 
+                  ? participatedWindows.reduce((sum, mass) => sum + mass.avgMass, 0) / participatedWindows.length
                   : 0;
 
                 // Fetch additional guild data
@@ -594,9 +598,10 @@ export const guildsRouter = router({
             // Process guilds and fetch additional data
             const enhancedGuilds = await Promise.all(
               topGuilds.map(async (gs, index) => {
-                // Calculate average mass across all prime time windows
-                const avgMass = gs.primeTimeMasses.length > 0 
-                  ? gs.primeTimeMasses.reduce((sum, mass) => sum + mass.avgMass, 0) / gs.primeTimeMasses.length
+                // Calculate average mass across prime time windows where guild actually participated
+                const participatedWindows = gs.primeTimeMasses.filter(mass => mass.battleCount > 0);
+                const avgMass = participatedWindows.length > 0 
+                  ? participatedWindows.reduce((sum, mass) => sum + mass.avgMass, 0) / participatedWindows.length
                   : 0;
 
                 // Fetch additional guild data
