@@ -686,7 +686,7 @@ export class BattleAnalysisService {
   /**
    * Extract guild alliances from battle data and kills data
    */
-  private extractGuildAlliances(battleData: any, killsData: any[]): Map<string, string> {
+  public extractGuildAlliances(battleData: any, killsData: any[]): Map<string, string> {
     const guildAlliances = new Map<string, string>();
 
     try {

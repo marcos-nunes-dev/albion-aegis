@@ -241,6 +241,19 @@ async function processMmrCalculationJob(job: Job<MmrCalculationJobData>): Promis
     );
     console.log(`✅ [MMR-QUEUE] Got MMR data for ${guildStatsWithMmr.length} guilds in battle ${battleId}`);
 
+    // Fetch battle data to extract alliance information
+    console.log(`🏆 [MMR-QUEUE] Fetching battle data for alliance extraction for battle ${battleId}`);
+    const battleData = await battleAnalysisService.fetchBattleDataForMmr(battleId);
+    if (!battleData) {
+      console.error(`❌ [MMR-QUEUE] Battle data not found for alliance extraction: ${battleId}`);
+      throw new Error(`Battle data not found: ${battleId}`);
+    }
+
+    // Extract alliance information
+    console.log(`🏆 [MMR-QUEUE] Extracting alliance information for battle ${battleId}`);
+    const guildAlliances = battleAnalysisService.extractGuildAlliances(battleData.battle, battleData.kills);
+    console.log(`📊 [MMR-QUEUE] Extracted ${guildAlliances.size} alliances for battle ${battleId}:`, Array.from(guildAlliances.entries()));
+
     // Create battle analysis
     const battleAnalysis: BattleAnalysis = {
       battleId,
@@ -251,7 +264,8 @@ async function processMmrCalculationJob(job: Job<MmrCalculationJobData>): Promis
       battleDuration,
       isPrimeTime,
       killClustering,
-      friendGroups
+      friendGroups,
+      guildAlliances
     };
 
     // Calculate MMR changes
