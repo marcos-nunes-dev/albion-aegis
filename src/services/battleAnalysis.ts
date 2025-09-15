@@ -695,7 +695,10 @@ export class BattleAnalysisService {
         killsDataLength: killsData?.length || 0,
         hasGuilds: !!(battleData?.guilds),
         hasGuildsJson: !!(battleData?.guildsJson),
-        hasPlayers: !!(battleData?.players)
+        hasAlliancesJson: !!(battleData?.alliancesJson),
+        hasPlayers: !!(battleData?.players),
+        guildsJsonType: typeof battleData?.guildsJson,
+        alliancesJsonType: typeof battleData?.alliancesJson
       });
 
       // First try to get alliances from battle data guilds (API response format)
@@ -710,27 +713,50 @@ export class BattleAnalysisService {
       }
       
       // Then try to get alliances from guildsJson
-      if (battleData.guildsJson && typeof battleData.guildsJson === 'object') {
-        const guildsJson = battleData.guildsJson;
-        logger.debug('Processing battleData.guildsJson', { 
-          isArray: Array.isArray(guildsJson),
-          keys: Array.isArray(guildsJson) ? guildsJson.length : Object.keys(guildsJson).length
-        });
-        if (Array.isArray(guildsJson)) {
-          for (const guild of guildsJson) {
-            if (guild.name && guild.alliance) {
-              guildAlliances.set(guild.name, guild.alliance);
-              logger.debug('Found alliance from guildsJson array', { guildName: guild.name, alliance: guild.alliance });
-            }
+      if (battleData.guildsJson) {
+        let guildsJson;
+        
+        // Handle both string and object formats
+        if (typeof battleData.guildsJson === 'string') {
+          try {
+            guildsJson = JSON.parse(battleData.guildsJson);
+            logger.debug('Parsed guildsJson from string', { 
+              originalType: typeof battleData.guildsJson,
+              parsedType: typeof guildsJson,
+              isArray: Array.isArray(guildsJson)
+            });
+          } catch (error) {
+            logger.warn('Failed to parse guildsJson string', { 
+              error: error instanceof Error ? error.message : 'Unknown error',
+              guildsJson: battleData.guildsJson
+            });
+            guildsJson = null;
           }
-        } else {
-          // Handle object format
-          for (const [key, guildInfo] of Object.entries(guildsJson)) {
-            const guildName = (guildInfo as any).name || (guildInfo as any).Name || key;
-            const alliance = (guildInfo as any).alliance || (guildInfo as any).Alliance;
-            if (guildName && alliance) {
-              guildAlliances.set(guildName, alliance);
-              logger.debug('Found alliance from guildsJson object', { guildName, alliance });
+        } else if (typeof battleData.guildsJson === 'object') {
+          guildsJson = battleData.guildsJson;
+          logger.debug('Using guildsJson as object', { 
+            isArray: Array.isArray(guildsJson),
+            keys: Array.isArray(guildsJson) ? guildsJson.length : Object.keys(guildsJson).length
+          });
+        }
+        
+        if (guildsJson) {
+          if (Array.isArray(guildsJson)) {
+            for (const guild of guildsJson) {
+              if (guild.name && guild.alliance) {
+                guildAlliances.set(guild.name, guild.alliance);
+                logger.debug('Found alliance from guildsJson array', { guildName: guild.name, alliance: guild.alliance });
+              }
+            }
+          } else {
+            // Handle object format
+            for (const [key, guildInfo] of Object.entries(guildsJson)) {
+              const guildName = (guildInfo as any).name || (guildInfo as any).Name || key;
+              const alliance = (guildInfo as any).alliance || (guildInfo as any).Alliance;
+              if (guildName && alliance) {
+                guildAlliances.set(guildName, alliance);
+                logger.debug('Found alliance from guildsJson object', { guildName, alliance });
+              }
             }
           }
         }
