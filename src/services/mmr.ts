@@ -55,6 +55,12 @@ const MMR_CONSTANTS = {
   ANTI_FARMING_SEASON_LOOKBACK_DAYS: 30, // Look back 30 days for anti-farming
   ANTI_FARMING_WIN_THRESHOLD: 3, // Wins against an opponent before reduction
   ANTI_FARMING_MAX_WINS: 10, // Maximum wins against an opponent before full reduction
+  
+  // IP-based farming detection constants
+  LOW_IP_THRESHOLD: 1380, // IP below this is considered low
+  IP_FARMING_OPPONENT_THRESHOLD: 0.6, // If 60%+ of opponents have low IP, trigger farming penalty
+  IP_FARMING_MAX_MMR_GAIN: 5, // Maximum MMR gain when IP farming is detected
+  IP_FARMING_PENALTY_MULTIPLIER: 0.3, // Reduce MMR gain to 30% when farming detected
 } as const;
 
 export interface GuildBattleStats {
@@ -91,6 +97,144 @@ export class MmrService {
 
   constructor(prisma: PrismaClient) {
     this.prisma = prisma;
+  }
+
+  /**
+   * Get detailed factor breakdown for a guild (for simulation/debugging)
+   */
+  async getGuildFactorBreakdown(
+    guildStat: GuildBattleStats,
+    battleAnalysis: BattleAnalysis
+  ): Promise<{
+    factors: any;
+    weights: any;
+    contributions: any;
+    totalWeightedScore: number;
+    playerCountScalingFactor: number;
+    finalMmrChange: number;
+    isIpFarming: boolean;
+  }> {
+    // Calculate all individual factors using the actual service methods
+    const winLossFactor = this.calculateWinLossFactor(guildStat, battleAnalysis);
+    const fameFactor = this.calculateFameFactor(guildStat, battleAnalysis);
+    const playerCountFactor = this.calculatePlayerCountFactor(guildStat, battleAnalysis);
+    const ipFactor = this.calculateIpFactor(guildStat, battleAnalysis);
+    const battleSizeFactor = this.calculateBattleSizeFactor(battleAnalysis);
+    const kdFactor = this.calculateKdFactor(guildStat);
+    const durationFactor = this.calculateDurationFactor(battleAnalysis);
+    const clusteringFactor = this.calculateClusteringFactor(guildStat);
+    const opponentStrengthFactor = this.calculateOpponentStrengthFactor(guildStat, battleAnalysis);
+    const individualPerformanceFactor = this.calculateIndividualPerformanceFactor(guildStat, battleAnalysis);
+
+    const factors = {
+      winLoss: winLossFactor,
+      fame: fameFactor,
+      playerCount: playerCountFactor,
+      ip: ipFactor,
+      battleSize: battleSizeFactor,
+      kd: kdFactor,
+      duration: durationFactor,
+      clustering: clusteringFactor,
+      opponentStrength: opponentStrengthFactor,
+      individualPerformance: individualPerformanceFactor
+    };
+
+    // Calculate weighted contributions
+    const weights = {
+      winLoss: MMR_CONSTANTS.WIN_LOSS_WEIGHT,
+      fame: MMR_CONSTANTS.FAME_WEIGHT,
+      playerCount: MMR_CONSTANTS.PLAYER_COUNT_WEIGHT,
+      ip: MMR_CONSTANTS.IP_WEIGHT,
+      battleSize: MMR_CONSTANTS.BATTLE_SIZE_WEIGHT,
+      kd: MMR_CONSTANTS.KD_RATIO_WEIGHT,
+      duration: MMR_CONSTANTS.BATTLE_DURATION_WEIGHT,
+      clustering: MMR_CONSTANTS.KILL_CLUSTERING_WEIGHT,
+      opponentStrength: MMR_CONSTANTS.OPPONENT_MMR_WEIGHT,
+      individualPerformance: MMR_CONSTANTS.INDIVIDUAL_PERFORMANCE_WEIGHT
+    };
+
+    const contributions = {
+      winLoss: winLossFactor * weights.winLoss,
+      fame: fameFactor * weights.fame,
+      playerCount: playerCountFactor * weights.playerCount,
+      ip: ipFactor * weights.ip,
+      battleSize: battleSizeFactor * weights.battleSize,
+      kd: kdFactor * weights.kd,
+      duration: durationFactor * weights.duration,
+      clustering: clusteringFactor * weights.clustering,
+      opponentStrength: opponentStrengthFactor * weights.opponentStrength,
+      individualPerformance: individualPerformanceFactor * weights.individualPerformance
+    };
+
+    const totalWeightedScore = Object.values(contributions).reduce((sum, val) => sum + val, 0);
+
+    // Calculate player count scaling factor
+    const playerCountScalingFactor = this.calculatePlayerCountScalingFactor(guildStat);
+
+    // Calculate final MMR change (without anti-farming for now)
+    let finalMmrChange = Math.max(
+      -MMR_CONSTANTS.K_FACTOR,
+      Math.min(
+        MMR_CONSTANTS.K_FACTOR,
+        totalWeightedScore * MMR_CONSTANTS.K_FACTOR * playerCountScalingFactor
+      )
+    );
+
+    // Apply additional constraints for easy wins and losses
+    const isWin = winLossFactor > 0;
+    if (isWin && finalMmrChange > 0) {
+      finalMmrChange = Math.min(finalMmrChange, MMR_CONSTANTS.MAX_MMR_GAIN_FOR_EASY_WIN);
+    }
+    // REMOVED: Minimum loss cap to allow proper scaling of MMR losses
+    // The system should naturally scale losses based on performance
+    
+    // CRITICAL: Winning guilds should never lose MMR (minimum 0)
+    // This prevents penalties from making winners lose MMR
+    if (isWin && finalMmrChange < 0) {
+      finalMmrChange = 0;
+    }
+    
+    // CRITICAL: Poor performers should never gain MMR from bonuses alone
+    // If win/loss factor is negative (poor performance), cap MMR at 0
+    // This prevents underdog bonuses from creating MMR gains from nowhere
+    if (!isWin && finalMmrChange > 0) {
+      finalMmrChange = 0;
+    }
+    
+    // CRITICAL: Good performers should never lose MMR from penalties
+    // If guild has good individual performance (K/D ≥ 1.0 and positive fame), cap MMR loss at 0
+    // This prevents penalties from taking MMR away from guilds with good performance
+    const hasGoodKD = guildStat.deaths === 0 || (guildStat.kills / guildStat.deaths) >= 1.0;
+    const hasPositiveFame = guildStat.fameGained > guildStat.fameLost;
+    const hasGoodIndividualPerformance = hasGoodKD && hasPositiveFame;
+    
+    if (hasGoodIndividualPerformance && finalMmrChange < 0) {
+      finalMmrChange = 0;
+    }
+
+    // Apply IP farming penalty for wins against low-IP opponents
+    let isIpFarming = false;
+    if (isWin && finalMmrChange > 0) {
+      isIpFarming = this.detectIpFarming(guildStat, battleAnalysis);
+      
+      if (isIpFarming) {
+        // Apply heavy penalty for IP farming
+        finalMmrChange = Math.min(
+          finalMmrChange * MMR_CONSTANTS.IP_FARMING_PENALTY_MULTIPLIER,
+          MMR_CONSTANTS.IP_FARMING_MAX_MMR_GAIN
+        );
+      }
+    }
+
+    return {
+      factors,
+      weights,
+      contributions,
+      totalWeightedScore,
+      playerCountScalingFactor,
+      finalMmrChange,
+      isIpFarming
+    };
   }
 
   /**
@@ -237,9 +381,54 @@ export class MmrService {
       if (isWin && finalMmrChange > 0) {
         // Cap easy wins to prevent excessive MMR gain
         finalMmrChange = Math.min(finalMmrChange, MMR_CONSTANTS.MAX_MMR_GAIN_FOR_EASY_WIN);
-      } else if (!isWin && finalMmrChange < 0) {
-        // Ensure losses lose a minimum amount of points
-        finalMmrChange = Math.min(finalMmrChange, -MMR_CONSTANTS.MIN_MMR_LOSS_FOR_LOSS);
+      }
+      // REMOVED: Minimum loss cap to allow proper scaling of MMR losses
+      // The system should naturally scale losses based on performance
+      
+      // CRITICAL: Winning guilds should never lose MMR (minimum 0)
+      // This prevents penalties from making winners lose MMR
+      if (isWin && finalMmrChange < 0) {
+        finalMmrChange = 0;
+      }
+      
+      // CRITICAL: Poor performers should never gain MMR from bonuses alone
+      // If win/loss factor is negative (poor performance), cap MMR at 0
+      // This prevents underdog bonuses from creating MMR gains from nowhere
+      if (!isWin && finalMmrChange > 0) {
+        finalMmrChange = 0;
+      }
+      
+      // CRITICAL: Good performers should never lose MMR from penalties
+      // If guild has good individual performance (K/D ≥ 1.0 and positive fame), cap MMR loss at 0
+      // This prevents penalties from taking MMR away from guilds with good performance
+      const hasGoodKD = guildStat.deaths === 0 || (guildStat.kills / guildStat.deaths) >= 1.0;
+      const hasPositiveFame = guildStat.fameGained > guildStat.fameLost;
+      const hasGoodIndividualPerformance = hasGoodKD && hasPositiveFame;
+      
+      if (hasGoodIndividualPerformance && finalMmrChange < 0) {
+        finalMmrChange = 0;
+      }
+
+      // Apply IP farming penalty for wins against low-IP opponents
+      if (isWin && finalMmrChange > 0) {
+        const isIpFarming = this.detectIpFarming(guildStat, battleAnalysis);
+        
+        if (isIpFarming) {
+          // Apply heavy penalty for IP farming
+          const originalMmrChange = finalMmrChange;
+          finalMmrChange = Math.min(
+            finalMmrChange * MMR_CONSTANTS.IP_FARMING_PENALTY_MULTIPLIER,
+            MMR_CONSTANTS.IP_FARMING_MAX_MMR_GAIN
+          );
+
+          logger.debug('Applied IP farming penalty', {
+            guildName: guildStat.guildName,
+            originalMmrChange,
+            finalMmrChange,
+            penaltyMultiplier: MMR_CONSTANTS.IP_FARMING_PENALTY_MULTIPLIER,
+            maxMmrGain: MMR_CONSTANTS.IP_FARMING_MAX_MMR_GAIN
+          });
+        }
       }
 
       // Apply anti-farming factor to reduce MMR gains for repeated wins against same opponents
@@ -328,7 +517,8 @@ export class MmrService {
 
   /**
    * Calculate win/loss factor (-1 to 1)
-   * Now properly handles alliances - only considers enemy guilds for win/loss calculation
+   * IMPROVED: More sophisticated win/loss calculation with nuanced scoring
+   * Now properly handles alliances and provides fair, contextual win/loss determination
    */
   private calculateWinLossFactor(
     guildStat: GuildBattleStats,
@@ -354,26 +544,108 @@ export class MmrService {
       return otherGuildAlliance !== guildAlliance;
     });
 
-    // Calculate total kills from enemy guilds only
-    const enemyTotalKills = enemyGuilds.reduce((sum, g) => sum + g.kills, 0);
-    const totalKills = guildStat.kills + enemyTotalKills;
-    
-    if (totalKills === 0) return 0; // No kills in battle
-    
-    const guildKillRatio = guildStat.kills / totalKills;
-
-    // Determine if guild won against enemies (had significant kills vs enemies)
-    const isWinner = guildKillRatio > 0.3; // Guild won if they got >30% of total kills
-    const isLoser = guildStat.deaths > guildStat.kills * 2; // Guild lost if deaths > 2x kills
-
     // If there are no enemies (all guilds are allies), return neutral
     if (enemyGuilds.length === 0) {
       return 0; // Neutral - no enemies to win/lose against
     }
 
-    if (isWinner) return 1;
-    if (isLoser) return -1;
-    return 0; // Neutral
+    // Calculate enemy totals
+    const enemyTotalKills = enemyGuilds.reduce((sum, g) => sum + g.kills, 0);
+    const enemyTotalDeaths = enemyGuilds.reduce((sum, g) => sum + g.deaths, 0);
+    const enemyTotalFameGained = enemyGuilds.reduce((sum, g) => sum + g.fameGained, 0);
+    const enemyTotalFameLost = enemyGuilds.reduce((sum, g) => sum + g.fameLost, 0);
+    const enemyTotalPlayers = enemyGuilds.reduce((sum, g) => sum + g.players, 0);
+
+    // Calculate total battle metrics (guild + enemies)
+    const totalKills = guildStat.kills + enemyTotalKills;
+    const totalDeaths = guildStat.deaths + enemyTotalDeaths;
+    const totalFameGained = guildStat.fameGained + enemyTotalFameGained;
+    const totalFameLost = guildStat.fameLost + enemyTotalFameLost;
+    const totalPlayers = guildStat.players + enemyTotalPlayers;
+
+    // If no meaningful battle activity, return neutral
+    if (totalKills === 0 && totalDeaths === 0) {
+      return 0;
+    }
+
+    // IMPROVED: Multi-factor win/loss calculation with minimum 0 for good performers
+    let winScore = 0;
+    let totalWeight = 0;
+
+    // 1. Kill Performance (40% weight)
+    if (totalKills > 0) {
+      const killRatio = guildStat.kills / totalKills;
+      const expectedKillRatio = guildStat.players / totalPlayers; // Expected based on player count
+      const killPerformance = (killRatio - expectedKillRatio) * 2; // Scale for impact
+      winScore += killPerformance * 0.4;
+      totalWeight += 0.4;
+    }
+
+    // 2. Death Avoidance (30% weight)
+    if (totalDeaths > 0) {
+      const deathRatio = guildStat.deaths / totalDeaths;
+      const expectedDeathRatio = guildStat.players / totalPlayers; // Expected based on player count
+      const deathPerformance = (expectedDeathRatio - deathRatio) * 2; // Lower deaths = better
+      winScore += deathPerformance * 0.3;
+      totalWeight += 0.3;
+    }
+
+    // 3. Fame Efficiency (20% weight)
+    if (totalFameGained > 0) {
+      const fameGainedRatio = guildStat.fameGained / totalFameGained;
+      const expectedFameRatio = guildStat.players / totalPlayers;
+      const famePerformance = (fameGainedRatio - expectedFameRatio) * 1.5;
+      winScore += famePerformance * 0.2;
+      totalWeight += 0.2;
+    }
+
+    // 4. Fame Loss Minimization (10% weight)
+    if (totalFameLost > 0) {
+      const fameLostRatio = guildStat.fameLost / totalFameLost;
+      const expectedFameLostRatio = guildStat.players / totalPlayers;
+      const fameLossPerformance = (expectedFameLostRatio - fameLostRatio) * 1.5; // Lower losses = better
+      winScore += fameLossPerformance * 0.1;
+      totalWeight += 0.1;
+    }
+
+    // Normalize by total weight
+    if (totalWeight > 0) {
+      winScore = winScore / totalWeight;
+    }
+
+    // Apply battle size scaling - larger battles get more weight
+    const battleSizeMultiplier = Math.min(1.5, Math.max(0.5, battleAnalysis.totalPlayers / 50));
+    winScore *= battleSizeMultiplier;
+
+    // Apply alliance size scaling - smaller alliances get bonus for good performance
+    if (guildAlliance && battleAnalysis.guildAlliances) {
+      const allianceGuilds = battleAnalysis.guildStats.filter(g => 
+        battleAnalysis.guildAlliances?.get(g.guildName) === guildAlliance
+      );
+      const alliancePlayers = allianceGuilds.reduce((sum, g) => sum + g.players, 0);
+      const allianceRatio = alliancePlayers / totalPlayers;
+      
+      // Underdog bonus for smaller alliances (only if already performing well)
+      if (allianceRatio < 0.3 && winScore > 0) {
+        winScore *= 1.2; // 20% bonus for underdog alliances
+      } else if (allianceRatio > 0.7) {
+        winScore *= 0.8; // 20% penalty for dominant alliances
+      }
+    }
+
+    // CRITICAL FIX: Ensure good performers never get negative win/loss
+    // If guild has good K/D ratio (>= 1.0) and positive fame gain, minimum score is 0
+    const hasGoodKD = guildStat.deaths === 0 || (guildStat.kills / guildStat.deaths) >= 1.0;
+    const hasPositiveFame = guildStat.fameGained > guildStat.fameLost;
+    const hasGoodPerformance = hasGoodKD && hasPositiveFame;
+    
+    if (hasGoodPerformance) {
+      // Good performers get minimum 0, maximum 1
+      return Math.max(0, Math.min(1, winScore));
+    }
+
+    // Poor performers can get negative scores (down to -1)
+    return Math.max(-1, Math.min(1, winScore));
   }
 
   /**
@@ -422,43 +694,53 @@ export class MmrService {
         if (opponentPlayers > 0) {
           const allianceRatio = alliancePlayers / opponentPlayers;
           
-          // Apply underdog bonuses and advantage penalties based on alliance totals
-          if (allianceRatio >= 2.0) return -1.0; // Severe penalty for 2x+ advantage
-          if (allianceRatio >= 1.5) return -0.8; // Heavy penalty for 50%+ advantage
-          if (allianceRatio >= 1.3) return -0.6; // Moderate penalty for 30%+ advantage
-          if (allianceRatio <= 0.5) return 1.0; // Maximum bonus for 50%+ disadvantage
-          if (allianceRatio <= 0.7) return 0.8; // High bonus for 30%+ disadvantage
-          if (allianceRatio <= 0.9) return 0.4; // Moderate bonus for 10%+ disadvantage
-          return 0; // Fair fight
+          // FIXED: Apply underdog bonuses and advantage penalties based on alliance totals
+          // Compare relative to the largest alliance, not just opponent alliance
+          const maxAlliancePlayers = Math.max(alliancePlayers, opponentPlayers);
+          const guildRatio = guildStat.players / maxAlliancePlayers;
+          
+          // If this guild has the most players in their alliance, no bonus
+          if (guildRatio >= 1.0) {
+            return 0; // No bonus for having the most players
+          }
+          
+          // Underdog bonuses only apply when there's already positive performance
+          // This prevents creating MMR gains from nowhere for poor performers
+          if (guildRatio <= 0.3) {
+            return 0.5; // Reduced bonus for having 30% or fewer players than the largest alliance
+          }
+          if (guildRatio <= 0.5) {
+            return 0.3; // Reduced bonus for having 50% or fewer players than the largest alliance
+          }
+          if (guildRatio <= 0.7) {
+            return 0.1; // Small bonus for having 70% or fewer players than the largest alliance
+          }
+          return 0; // Fair fight (0.7 to 1.0 ratio)
         }
       }
     }
     
     // Fallback to individual guild calculation
-    const avgPlayers =
-      battleAnalysis.totalPlayers / battleAnalysis.guildStats.length;
-    const playerRatio = guildStat.players / avgPlayers;
+    // FIXED: Compare relative to the largest guild, not average
+    const maxPlayers = Math.max(...battleAnalysis.guildStats.map(g => g.players));
+    const playerRatio = guildStat.players / maxPlayers;
 
     // More aggressive penalties for player count advantages
-    if (playerRatio >= 2.0) {
-      return -1.0; // Severe penalty for having 2x+ more players
+    if (playerRatio >= 1.0) {
+      return 0; // No bonus for having the most players or equal to the most
     }
-    if (playerRatio >= 1.5) {
-      return -0.8; // Heavy penalty for having 50%+ more players
-    }
-    if (playerRatio >= 1.3) {
-      return -0.6; // Moderate penalty for having 30%+ more players
+    // Underdog bonuses only apply when there's already positive performance
+    // This prevents creating MMR gains from nowhere for poor performers
+    if (playerRatio <= 0.3) {
+      return 0.5; // Reduced bonus for having 30% or fewer players than the largest guild
     }
     if (playerRatio <= 0.5) {
-      return 1.0; // Maximum bonus for having 50% or fewer players
+      return 0.3; // Reduced bonus for having 50% or fewer players than the largest guild
     }
     if (playerRatio <= 0.7) {
-      return 0.8; // High bonus for having 30% or fewer players
+      return 0.1; // Small bonus for having 70% or fewer players than the largest guild
     }
-    if (playerRatio <= 0.9) {
-      return 0.4; // Moderate bonus for having 10% or fewer players
-    }
-    return 0; // Fair fight (0.9 to 1.3 ratio)
+    return 0; // Fair fight (0.7 to 1.0 ratio)
   }
 
   /**
@@ -578,7 +860,17 @@ export class MmrService {
     // Apply sigmoid-like function to smooth the factor
     // Positive difference (guild has higher MMR) = negative factor (penalty for easy win)
     // Negative difference (guild has lower MMR) = positive factor (bonus for difficult win)
-    const factor = -Math.tanh(normalizedDifference);
+    let factor = -Math.tanh(normalizedDifference);
+    
+    // CRITICAL FIX: Opponent strength bonus should only amplify positive performance
+    // If guild has poor performance (K/D < 1.0), don't give opponent strength bonuses
+    // This prevents poor performers from getting MMR gains from fighting stronger opponents
+    const hasGoodKD = guildStat.deaths === 0 || (guildStat.kills / guildStat.deaths) >= 1.0;
+    
+    if (!hasGoodKD && factor > 0) {
+      // Poor performers don't get opponent strength bonuses
+      factor = 0;
+    }
     
     return Math.max(-1, Math.min(1, factor));
   }
@@ -1733,6 +2025,57 @@ export class MmrService {
     // Fallback: try to extract from kills data if available
     // This would require passing kills data to the battle analysis
     return null;
+  }
+
+  /**
+   * Detect if a guild is farming low-IP opponents
+   * Returns true if the guild is fighting against multiple low-IP opponents
+   */
+  private detectIpFarming(
+    guildStat: GuildBattleStats,
+    battleAnalysis: BattleAnalysis
+  ): boolean {
+    // Get the guild's alliance
+    const guildAlliance = this.getGuildAlliance(guildStat.guildName, battleAnalysis);
+    
+    // Filter out allied guilds - only consider enemy guilds for IP farming detection
+    const enemyGuilds = battleAnalysis.guildStats.filter(g => {
+      if (g.guildId === guildStat.guildId) return false; // Skip self
+      
+      // If no alliance data available, treat all other guilds as enemies
+      if (!battleAnalysis.guildAlliances || !guildAlliance) return true;
+      
+      // Get the other guild's alliance
+      const otherGuildAlliance = battleAnalysis.guildAlliances.get(g.guildName);
+      
+      // If the other guild has no alliance, treat as enemy
+      if (!otherGuildAlliance) return true;
+      
+      // Only consider as enemy if they're from different alliances
+      return otherGuildAlliance !== guildAlliance;
+    });
+
+    if (enemyGuilds.length === 0) return false; // No enemies, no farming
+
+    // Count how many enemy guilds have low IP
+    const lowIpEnemies = enemyGuilds.filter(g => g.avgIP < MMR_CONSTANTS.LOW_IP_THRESHOLD);
+    const lowIpRatio = lowIpEnemies.length / enemyGuilds.length;
+
+    // Check if enough opponents have low IP to consider this farming
+    const isFarming = lowIpRatio >= MMR_CONSTANTS.IP_FARMING_OPPONENT_THRESHOLD;
+
+    if (isFarming) {
+      logger.debug('IP farming detected', {
+        guildName: guildStat.guildName,
+        totalEnemies: enemyGuilds.length,
+        lowIpEnemies: lowIpEnemies.length,
+        lowIpRatio: lowIpRatio.toFixed(2),
+        threshold: MMR_CONSTANTS.IP_FARMING_OPPONENT_THRESHOLD,
+        lowIpEnemyNames: lowIpEnemies.map(g => `${g.guildName} (IP: ${g.avgIP})`)
+      });
+    }
+
+    return isFarming;
   }
 
   /**
