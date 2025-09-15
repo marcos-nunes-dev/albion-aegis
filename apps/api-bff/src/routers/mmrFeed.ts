@@ -92,27 +92,39 @@ export const mmrFeedRouter = router({
               }
             }
 
-            // Get MMR calculation logs with pagination
-            const [mmrLogs, total] = await Promise.all([
-              prisma.mmrCalculationLog.findMany({
-                where: whereClause,
-                include: {
-                  guild: true,
-                  season: true,
-                },
-                orderBy: { processedAt: 'desc' },
-                skip: (page - 1) * pageSize,
-                take: pageSize,
-              }),
-              // For guild search, we need to count unique battles, not individual logs
-              searchTerm && !isNumeric ? 
-                prisma.mmrCalculationLog.findMany({
-                  where: whereClause,
-                  select: { battleId: true },
-                  distinct: ['battleId']
-                }).then(results => results.length) :
-                prisma.mmrCalculationLog.count({ where: whereClause })
-            ]);
+            // First, get all unique battles that match the criteria
+            const uniqueBattles = await prisma.mmrCalculationLog.findMany({
+              where: whereClause,
+              select: { 
+                battleId: true,
+                processedAt: true
+              },
+              distinct: ['battleId'],
+              orderBy: { processedAt: 'desc' }
+            });
+
+            const totalBattles = uniqueBattles.length;
+            
+            // Apply pagination to unique battles
+            const paginatedBattles = uniqueBattles.slice(
+              (page - 1) * pageSize, 
+              page * pageSize
+            );
+
+            // Get MMR logs for the paginated battles
+            const mmrLogs = await prisma.mmrCalculationLog.findMany({
+              where: {
+                ...whereClause,
+                battleId: {
+                  in: paginatedBattles.map(b => b.battleId)
+                }
+              },
+              include: {
+                guild: true,
+                season: true,
+              },
+              orderBy: { processedAt: 'desc' },
+            });
 
             // Group by battle
             const battleGroups = new Map();
