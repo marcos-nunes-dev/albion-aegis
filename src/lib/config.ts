@@ -61,7 +61,7 @@ const configSchema = z.object({
   REDIS_WORKER_CLEANUP_INTERVAL_MIN: z.coerce.number().positive().default(8), // Reduced from 10 to 8 minutes
   
   // Cache Configuration
-  DISABLE_CACHE: z.coerce.boolean().default(true), // Set to true to disable all caching
+  DISABLE_CACHE: z.coerce.boolean().default(false), // Set to true to disable all caching
 });
 
 // Parse and validate the configuration
