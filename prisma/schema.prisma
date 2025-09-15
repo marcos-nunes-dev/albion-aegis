@@ -1,32 +1,28 @@
-// This is your Prisma schema file,
-// learn more about it in the docs: https://pris.ly/d/prisma-schema
-
 generator client {
   provider = "prisma-client-js"
 }
 
 datasource db {
-  provider = "postgresql"
-  url      = env("DATABASE_URL")
-  // Connection pool settings for better performance with poolers
-  directUrl = env("DIRECT_URL") // Direct connection for migrations
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
 }
 
 model ServiceState {
-  key       String  @id
+  key       String   @id
   value     String
   updatedAt DateTime @updatedAt
 }
 
 model Battle {
-  albionId       BigInt   @id
+  albionId       BigInt    @id
   startedAt      DateTime
   totalFame      Int
   totalKills     Int
   totalPlayers   Int
   alliancesJson  Json
   guildsJson     Json
-  ingestedAt     DateTime @default(now())
+  ingestedAt     DateTime  @default(now())
   killsFetchedAt DateTime?
 
   @@index([startedAt])
@@ -37,25 +33,18 @@ model KillEvent {
   TimeStamp           DateTime
   TotalVictimKillFame Int
   battleAlbionId      BigInt?
-
-  // Killer information
   killerId            String   @db.VarChar(64)
   killerName          String   @db.VarChar(48)
   killerGuild         String?  @db.VarChar(64)
   killerAlliance      String?  @db.VarChar(16)
   killerAvgIP         Float
-
-  // Victim information
   victimId            String   @db.VarChar(64)
   victimName          String   @db.VarChar(48)
   victimGuild         String?  @db.VarChar(64)
   victimAlliance      String?  @db.VarChar(16)
   victimAvgIP         Float
-
-  // Equipment (stored as JSON)
   killerEquipment     Json?
   victimEquipment     Json?
-  
   ingestedAt          DateTime @default(now())
 
   @@index([TimeStamp])
@@ -66,95 +55,77 @@ model KillEvent {
   @@index([victimId])
 }
 
-// Tracking subscriptions for guild/alliance monitoring
 model TrackingSubscription {
-  id              String   @id @default(cuid())
-  userId          String   @db.VarChar(64) // User identifier (can be email, discord ID, etc.)
-  entityName      String   @db.VarChar(64) // Guild or Alliance name
+  id              String           @id @default(cuid())
+  userId          String           @db.VarChar(64)
+  entityName      String           @db.VarChar(64)
   entityType      EntityType
-  discordWebhook  String   @db.Text // Discord webhook URL
-  minTotalFame    Int      @default(0)
-  minTotalKills   Int      @default(0)
-  minTotalPlayers Int      @default(0)
-  isActive        Boolean  @default(true)
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
-
-  // Counter history for this subscription
-  counterHistory  CounterHistory[]
-  
-  // Individual battle results
+  discordWebhook  String
+  minTotalFame    Int              @default(0)
+  minTotalKills   Int              @default(0)
+  minTotalPlayers Int              @default(0)
+  isActive        Boolean          @default(true)
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
   battleResults   BattleResult[]
+  counterHistory  CounterHistory[]
 
   @@index([entityName, entityType])
   @@index([userId])
   @@index([isActive])
 }
 
-// Counter history for tracking W/L - KD - Winrate over time
 model CounterHistory {
-  id                    String   @id @default(cuid())
-  subscriptionId        String
-  periodName            String   @db.VarChar(64) // e.g., "2024-01-01 to 2024-01-15"
-  startDate             DateTime
-  endDate               DateTime?
-  totalWins             Int      @default(0)
-  totalLosses           Int      @default(0)
-  totalKills            Int      @default(0)
-  totalDeaths           Int      @default(0)
-  isActive              Boolean  @default(true) // false when period is ended
-  createdAt             DateTime @default(now())
-  updatedAt             DateTime @updatedAt
-
-  // Reference to subscription
-  subscription          TrackingSubscription @relation(fields: [subscriptionId], references: [id], onDelete: Cascade)
-  
-  // Individual battle results for this counter period
-  battleResults         BattleResult[]
+  id             String               @id @default(cuid())
+  subscriptionId String
+  periodName     String               @db.VarChar(64)
+  startDate      DateTime
+  endDate        DateTime?
+  totalWins      Int                  @default(0)
+  totalLosses    Int                  @default(0)
+  totalKills     Int                  @default(0)
+  totalDeaths    Int                  @default(0)
+  isActive       Boolean              @default(true)
+  createdAt      DateTime             @default(now())
+  updatedAt      DateTime             @updatedAt
+  battleResults  BattleResult[]
+  subscription   TrackingSubscription @relation(fields: [subscriptionId], references: [id], onDelete: Cascade)
 
   @@index([subscriptionId])
   @@index([isActive])
   @@index([startDate])
 }
 
-// Individual battle results for detailed tracking
 model BattleResult {
-  id                    String   @id @default(cuid())
-  subscriptionId        String
-  counterHistoryId      String
-  battleAlbionId        BigInt
-  isWin                 Boolean
-  kills                 Int      @default(0)
-  deaths                Int      @default(0)
-  totalFame             Int
-  totalPlayers          Int
-  processedAt           DateTime @default(now())
+  id               String               @id @default(cuid())
+  subscriptionId   String
+  counterHistoryId String
+  battleAlbionId   BigInt
+  isWin            Boolean
+  kills            Int                  @default(0)
+  deaths           Int                  @default(0)
+  totalFame        Int
+  totalPlayers     Int
+  processedAt      DateTime             @default(now())
+  counterHistory   CounterHistory       @relation(fields: [counterHistoryId], references: [id], onDelete: Cascade)
+  subscription     TrackingSubscription @relation(fields: [subscriptionId], references: [id], onDelete: Cascade)
 
-  // References
-  subscription          TrackingSubscription @relation(fields: [subscriptionId], references: [id], onDelete: Cascade)
-  counterHistory        CounterHistory @relation(fields: [counterHistoryId], references: [id], onDelete: Cascade)
-
+  @@unique([subscriptionId, battleAlbionId], name: "subscription_battle_unique")
   @@index([subscriptionId])
   @@index([counterHistoryId])
   @@index([battleAlbionId])
   @@index([processedAt])
-  @@unique([subscriptionId, battleAlbionId], name: "subscription_battle_unique")
 }
 
-// MMR System Models
-
-// Seasons management
 model Season {
-  id          String   @id @default(cuid())
-  name        String   @unique
-  startDate   DateTime
-  endDate     DateTime?
-  isActive    Boolean  @default(true)
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
-
-  // Relations
-  guildSeasons GuildSeason[]
+  id                 String              @id @default(cuid())
+  name               String              @unique
+  startDate          DateTime
+  endDate            DateTime?
+  isActive           Boolean             @default(true)
+  createdAt          DateTime            @default(now())
+  updatedAt          DateTime            @updatedAt
+  guildSeasons       GuildSeason[]
   mmrCalculationJobs MmrCalculationJob[]
   mmrCalculationLogs MmrCalculationLog[]
 
@@ -162,43 +133,44 @@ model Season {
   @@index([startDate])
 }
 
-// Unique guilds with their IDs from AlbionBB API
 model Guild {
-  id          String   @id // AlbionBB guild ID
-  name        String   @unique
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
-
-  // Relations
-  guildSeasons GuildSeason[]
+  id                 String              @id
+  name               String              @unique
+  createdAt          DateTime            @default(now())
+  updatedAt          DateTime            @updatedAt
+  guildSeasons       GuildSeason[]
   mmrCalculationLogs MmrCalculationLog[]
 
   @@index([name])
 }
 
-// Guild MMR data per season
 model GuildSeason {
-  id                    String   @id @default(cuid())
-  guildId               String
-  seasonId              String
-  currentMmr            Float    @default(1000.0) // Starting MMR
-  previousSeasonMmr     Float?   // MMR from previous season for bonus calculation
-  carryoverMmr          Float?   // MMR carried over to next season (30% of final MMR)
-  seasonEndMmr          Float?   // Final MMR when season ended
-  totalBattles          Int      @default(0)
-  wins                  Int      @default(0)
-  losses                Int      @default(0)
-  totalFameGained       BigInt   @default(0)
-  totalFameLost         BigInt   @default(0)
-  primeTimeBattles      Int      @default(0) // Count of prime time battles
-  lastBattleAt          DateTime?
-  createdAt             DateTime @default(now())
-  updatedAt             DateTime @updatedAt
-
-  // Relations
-  guild                 Guild    @relation(fields: [guildId], references: [id], onDelete: Cascade)
-  season                Season   @relation(fields: [seasonId], references: [id], onDelete: Cascade)
-  primeTimeMasses       GuildPrimeTimeMass[]
+  id                   String               @id @default(cuid())
+  guildId              String
+  seasonId             String
+  currentMmr           Float                @default(1000.0)
+  previousSeasonMmr    Float?
+  carryoverMmr         Float?
+  seasonEndMmr         Float?
+  totalBattles         Int                  @default(0)
+  wins                 Int                  @default(0)
+  losses               Int                  @default(0)
+  totalFameGained      BigInt               @default(0)
+  totalFameLost        BigInt               @default(0)
+  primeTimeBattles     Int                  @default(0)
+  lastBattleAt         DateTime?
+  createdAt            DateTime             @default(now())
+  updatedAt            DateTime             @updatedAt
+  lastBattleMmreAt     DateTime?
+  lossesMmre           Int                  @default(0)
+  primeTimeBattlesMmre Int                  @default(0)
+  totalBattlesMmre     Int                  @default(0)
+  totalFameGainedMmre  BigInt               @default(0)
+  totalFameLostMmre    BigInt               @default(0)
+  winsMmre             Int                  @default(0)
+  primeTimeMasses      GuildPrimeTimeMass[]
+  guild                Guild                @relation(fields: [guildId], references: [id], onDelete: Cascade)
+  season               Season               @relation(fields: [seasonId], references: [id], onDelete: Cascade)
 
   @@unique([guildId, seasonId])
   @@index([guildId])
@@ -207,20 +179,17 @@ model GuildSeason {
   @@index([lastBattleAt])
 }
 
-// Guild mass data per prime time window
 model GuildPrimeTimeMass {
-  id                    String   @id @default(cuid())
-  guildSeasonId         String
-  primeTimeWindowId     String
-  avgMass               Float    @default(0.0) // Average players during this prime time
-  battleCount           Int      @default(0) // Number of battles in this prime time
-  lastBattleAt          DateTime?
-  createdAt             DateTime @default(now())
-  updatedAt             DateTime @updatedAt
-
-  // Relations
-  guildSeason           GuildSeason @relation(fields: [guildSeasonId], references: [id], onDelete: Cascade)
-  primeTimeWindow       PrimeTimeWindow @relation(fields: [primeTimeWindowId], references: [id], onDelete: Cascade)
+  id                String          @id @default(cuid())
+  guildSeasonId     String
+  primeTimeWindowId String
+  avgMass           Float           @default(0.0)
+  battleCount       Int             @default(0)
+  lastBattleAt      DateTime?
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
+  guildSeason       GuildSeason     @relation(fields: [guildSeasonId], references: [id], onDelete: Cascade)
+  primeTimeWindow   PrimeTimeWindow @relation(fields: [primeTimeWindowId], references: [id], onDelete: Cascade)
 
   @@unique([guildSeasonId, primeTimeWindowId])
   @@index([guildSeasonId])
@@ -228,35 +197,29 @@ model GuildPrimeTimeMass {
   @@index([avgMass])
 }
 
-// Prime time windows for mass calculations (GLOBAL - same for all seasons)
 model PrimeTimeWindow {
-  id          String   @id @default(cuid())
-  startHour   Int      // 0-23
-  endHour     Int      // 0-23
-  timezone    String   @default("UTC")
-  createdAt   DateTime @default(now())
-
-  // Relations
+  id          String               @id @default(cuid())
+  startHour   Int
+  endHour     Int
+  timezone    String               @default("UTC")
+  createdAt   DateTime             @default(now())
   guildMasses GuildPrimeTimeMass[]
 
   @@index([startHour, endHour])
 }
 
-// MMR calculation jobs tracking
 model MmrCalculationJob {
-  id          String   @id @default(cuid())
-  battleId    BigInt
-  seasonId    String
-  status      MmrJobStatus @default(PENDING)
-  attempts    Int      @default(0)
-  maxAttempts Int      @default(3)
-  error       String?
-  processedAt DateTime?
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
-
-  // Relations
-  season      Season   @relation(fields: [seasonId], references: [id], onDelete: Cascade)
+  id                 String              @id @default(cuid())
+  battleId           BigInt
+  seasonId           String
+  status             MmrJobStatus        @default(PENDING)
+  attempts           Int                 @default(0)
+  maxAttempts        Int                 @default(3)
+  error              String?
+  processedAt        DateTime?
+  createdAt          DateTime            @default(now())
+  updatedAt          DateTime            @updatedAt
+  season             Season              @relation(fields: [seasonId], references: [id], onDelete: Cascade)
   mmrCalculationLogs MmrCalculationLog[]
 
   @@unique([battleId, seasonId])
@@ -266,79 +229,58 @@ model MmrCalculationJob {
   @@map("mmr_calculation_jobs")
 }
 
-// Detailed MMR calculation tracking for each guild in each battle
 model MmrCalculationLog {
-  id                    String   @id @default(cuid())
-  battleId              BigInt
-  seasonId              String
-  guildId               String
-  guildName             String   @db.VarChar(64)
-  
-  // MMR values
-  previousMmr           Float    // MMR before the battle
-  mmrChange             Float    // MMR change for this battle
-  newMmr                Float    // MMR after the battle
-  
-  // Battle statistics
-  kills                 Int      @default(0)
-  deaths                Int      @default(0)
-  fameGained            BigInt   @default(0)
-  fameLost              BigInt   @default(0)
-  players               Int      @default(0)
-  avgIP                 Float    @default(0.0)
-  isPrimeTime           Boolean  @default(false)
-  
-  // Battle context
-  totalBattlePlayers    Int      @default(0)
-  totalBattleFame       BigInt   @default(0)
-  battleDuration        Int      @default(0) // in minutes
-  killClustering        Float    @default(0.0)
-  
-  // MMR calculation factors (detailed breakdown)
-  winLossFactor         Float    @default(0.0)
-  fameFactor            Float    @default(0.0)
-  playerCountFactor     Float    @default(0.0)
-  ipFactor              Float    @default(0.0)
-  battleSizeFactor      Float    @default(0.0)
-  kdFactor              Float    @default(0.0)
-  durationFactor        Float    @default(0.0)
-  clusteringFactor      Float    @default(0.0)
-  opponentStrengthFactor Float   @default(0.0)
-  
-  // Weighted contributions
-  winLossContribution   Float    @default(0.0)
-  fameContribution      Float    @default(0.0)
-  playerCountContribution Float  @default(0.0)
-  ipContribution        Float    @default(0.0)
-  battleSizeContribution Float   @default(0.0)
-  kdContribution        Float    @default(0.0)
-  durationContribution  Float    @default(0.0)
-  clusteringContribution Float   @default(0.0)
-  opponentStrengthContribution Float @default(0.0)
-  
-  // Final calculation
-  totalWeightedScore    Float    @default(0.0)
-  kFactorApplied        Float    @default(0.0)
-  
-  // Additional context
-  isWin                 Boolean  @default(false)
-  hasSignificantParticipation Boolean @default(false)
-  allianceName          String?  @db.VarChar(16)
-  opponentGuilds        String[] // Array of opponent guild names
-  opponentMmrs          Float[]  // Array of opponent MMRs
-  
-  // Anti-farming tracking
-  antiFarmingFactor     Float?   // Anti-farming factor applied (null if not applied)
-  originalMmrChange     Float?   // MMR change before anti-farming was applied
-  
-  // Metadata
-  calculationVersion    String   @default("1.0") // For algorithm versioning
-  processedAt           DateTime @default(now())
-  
-  // Relations
-  season                Season   @relation(fields: [seasonId], references: [id], onDelete: Cascade)
-  guild                 Guild    @relation(fields: [guildId], references: [id], onDelete: Cascade)
-  mmrCalculationJob     MmrCalculationJob? @relation(fields: [battleId, seasonId], references: [battleId, seasonId], onDelete: Cascade)
+  id                           String            @id @default(cuid())
+  battleId                     BigInt
+  seasonId                     String
+  guildId                      String
+  guildName                    String            @db.VarChar(64)
+  previousMmr                  Float
+  mmrChange                    Float
+  newMmr                       Float
+  kills                        Int               @default(0)
+  deaths                       Int               @default(0)
+  fameGained                   BigInt            @default(0)
+  fameLost                     BigInt            @default(0)
+  players                      Int               @default(0)
+  avgIP                        Float             @default(0.0)
+  isPrimeTime                  Boolean           @default(false)
+  totalBattlePlayers           Int               @default(0)
+  totalBattleFame              BigInt            @default(0)
+  battleDuration               Int               @default(0)
+  killClustering               Float             @default(0.0)
+  winLossFactor                Float             @default(0.0)
+  fameFactor                   Float             @default(0.0)
+  playerCountFactor            Float             @default(0.0)
+  ipFactor                     Float             @default(0.0)
+  battleSizeFactor             Float             @default(0.0)
+  kdFactor                     Float             @default(0.0)
+  durationFactor               Float             @default(0.0)
+  clusteringFactor             Float             @default(0.0)
+  opponentStrengthFactor       Float             @default(0.0)
+  winLossContribution          Float             @default(0.0)
+  fameContribution             Float             @default(0.0)
+  playerCountContribution      Float             @default(0.0)
+  ipContribution               Float             @default(0.0)
+  battleSizeContribution       Float             @default(0.0)
+  kdContribution               Float             @default(0.0)
+  durationContribution         Float             @default(0.0)
+  clusteringContribution       Float             @default(0.0)
+  opponentStrengthContribution Float             @default(0.0)
+  totalWeightedScore           Float             @default(0.0)
+  kFactorApplied               Float             @default(0.0)
+  isWin                        Boolean           @default(false)
+  hasSignificantParticipation  Boolean           @default(false)
+  allianceName                 String?           @db.VarChar(16)
+  opponentGuilds               String[]
+  opponentMmrs                 Float[]
+  calculationVersion           String            @default("1.0")
+  processedAt                  DateTime          @default(now())
+  antiFarmingFactor            Float?
+  originalMmrChange            Float?
+  mmrCalculationJob            MmrCalculationJob @relation(fields: [battleId, seasonId], references: [battleId, seasonId], onDelete: Cascade)
+  guild                        Guild             @relation(fields: [guildId], references: [id], onDelete: Cascade)
+  season                       Season            @relation(fields: [seasonId], references: [id], onDelete: Cascade)
 
   @@unique([battleId, seasonId, guildId], name: "battleId_seasonId_guildId")
   @@index([battleId])
@@ -353,7 +295,6 @@ model MmrCalculationLog {
   @@map("mmr_calculation_logs")
 }
 
-// Enums
 enum EntityType {
   GUILD
   ALLIANCE

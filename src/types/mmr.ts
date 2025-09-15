@@ -44,6 +44,16 @@ export const zGuildSeason = z.object({
   totalFameLost: z.bigint().default(0n),
   primeTimeBattles: z.number().int().min(0).default(0),
   lastBattleAt: z.date().nullable(),
+  
+  // MMR-eligible battle statistics
+  totalBattlesMmre: z.number().int().min(0).default(0),
+  winsMmre: z.number().int().min(0).default(0),
+  lossesMmre: z.number().int().min(0).default(0),
+  totalFameGainedMmre: z.bigint().default(0n),
+  totalFameLostMmre: z.bigint().default(0n),
+  primeTimeBattlesMmre: z.number().int().min(0).default(0),
+  lastBattleMmreAt: z.date().nullable(),
+  
   createdAt: z.date(),
   updatedAt: z.date()
 });

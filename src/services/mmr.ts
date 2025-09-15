@@ -1111,6 +1111,13 @@ export class MmrService {
             totalFameGained: 0n,
             totalFameLost: 0n,
             primeTimeBattles: 0,
+            // Initialize MMR-eligible battle statistics
+            totalBattlesMmre: 0,
+            winsMmre: 0,
+            lossesMmre: 0,
+            totalFameGainedMmre: 0n,
+            totalFameLostMmre: 0n,
+            primeTimeBattlesMmre: 0,
           },
         });
       }
@@ -1121,6 +1128,12 @@ export class MmrService {
       // Determine win/loss
       const isWin =
         this.calculateWinLossFactor(battleStats, battleAnalysis) > 0;
+
+      // Check if this battle is MMR-eligible
+      const isMmreBattle = MmrService.shouldCalculateMmr(
+        battleAnalysis.totalPlayers,
+        battleAnalysis.totalFame
+      );
 
       // Update guild season
       await this.prisma.guildSeason.update({
@@ -1137,6 +1150,21 @@ export class MmrService {
           primeTimeBattles:
             guildSeason.primeTimeBattles + (battleStats.isPrimeTime ? 1 : 0),
           lastBattleAt: new Date(),
+          
+          // Update MMR-eligible battle statistics
+          totalBattlesMmre: isMmreBattle ? guildSeason.totalBattlesMmre + 1 : guildSeason.totalBattlesMmre,
+          winsMmre: isMmreBattle ? guildSeason.winsMmre + (isWin ? 1 : 0) : guildSeason.winsMmre,
+          lossesMmre: isMmreBattle ? guildSeason.lossesMmre + (isWin ? 0 : 1) : guildSeason.lossesMmre,
+          totalFameGainedMmre: isMmreBattle ? 
+            guildSeason.totalFameGainedMmre + BigInt(battleStats.fameGained) : 
+            guildSeason.totalFameGainedMmre,
+          totalFameLostMmre: isMmreBattle ? 
+            guildSeason.totalFameLostMmre + BigInt(battleStats.fameLost) : 
+            guildSeason.totalFameLostMmre,
+          primeTimeBattlesMmre: isMmreBattle ? 
+            guildSeason.primeTimeBattlesMmre + (battleStats.isPrimeTime ? 1 : 0) : 
+            guildSeason.primeTimeBattlesMmre,
+          lastBattleMmreAt: isMmreBattle ? new Date() : guildSeason.lastBattleMmreAt,
         },
       });
 
@@ -1587,6 +1615,15 @@ export class MmrService {
 
       // Get alliance information
       const allianceName = battleAnalysis.guildAlliances?.get(battleStats.guildName) ?? null;
+      
+      logger.debug('Retrieving alliance name for guild', {
+        guildName: battleStats.guildName,
+        guildId,
+        hasGuildAlliances: !!battleAnalysis.guildAlliances,
+        guildAlliancesSize: battleAnalysis.guildAlliances?.size || 0,
+        allianceName,
+        allAlliances: battleAnalysis.guildAlliances ? Array.from(battleAnalysis.guildAlliances.entries()) : []
+      });
 
       // Check significant participation
       const hasSignificantParticipation =

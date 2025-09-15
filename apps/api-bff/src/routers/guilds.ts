@@ -139,6 +139,15 @@ export const guildsRouter = router({
                       avgMass: Math.round(avgMass * 10) / 10,
                       lastBattleAt: gs.lastBattleAt,
                       rank, // Actual rank calculated efficiently
+                      // MMR-eligible battle statistics
+                      totalBattlesMmre: gs.totalBattlesMmre,
+                      winsMmre: gs.winsMmre,
+                      lossesMmre: gs.lossesMmre,
+                      winRateMmre: gs.totalBattlesMmre > 0 ? (gs.winsMmre / gs.totalBattlesMmre * 100).toFixed(1) : '0.0',
+                      totalFameGainedMmre: gs.totalFameGainedMmre,
+                      totalFameLostMmre: gs.totalFameLostMmre,
+                      primeTimeBattlesMmre: gs.primeTimeBattlesMmre,
+                      lastBattleMmreAt: gs.lastBattleMmreAt,
                       season: {
                         id: gs.season.id,
                         name: gs.season.name,
@@ -201,6 +210,15 @@ export const guildsRouter = router({
                     primeTimeBattles: gs.primeTimeBattles,
                     avgMass: Math.round(avgMass * 10) / 10,
                     lastBattleAt: gs.lastBattleAt,
+                    // MMR-eligible battle statistics
+                    totalBattlesMmre: gs.totalBattlesMmre,
+                    winsMmre: gs.winsMmre,
+                    lossesMmre: gs.lossesMmre,
+                    winRateMmre: gs.totalBattlesMmre > 0 ? (gs.winsMmre / gs.totalBattlesMmre * 100).toFixed(1) : '0.0',
+                    totalFameGainedMmre: gs.totalFameGainedMmre,
+                    totalFameLostMmre: gs.totalFameLostMmre,
+                    primeTimeBattlesMmre: gs.primeTimeBattlesMmre,
+                    lastBattleMmreAt: gs.lastBattleMmreAt,
                     season: {
                       id: gs.season.id,
                       name: gs.season.name,
@@ -241,6 +259,17 @@ export const guildsRouter = router({
                   winRate: activeSeason && activeSeason.totalBattles > 0
                     ? (activeSeason.wins / activeSeason.totalBattles * 100).toFixed(1)
                     : '0.0',
+                  // MMR-eligible battle statistics
+                  totalBattlesMmre: activeSeason?.totalBattlesMmre || 0,
+                  winsMmre: activeSeason?.winsMmre || 0,
+                  lossesMmre: activeSeason?.lossesMmre || 0,
+                  winRateMmre: activeSeason && activeSeason.totalBattlesMmre > 0
+                    ? (activeSeason.winsMmre / activeSeason.totalBattlesMmre * 100).toFixed(1)
+                    : '0.0',
+                  totalFameGainedMmre: activeSeason?.totalFameGainedMmre || 0n,
+                  totalFameLostMmre: activeSeason?.totalFameLostMmre || 0n,
+                  primeTimeBattlesMmre: activeSeason?.primeTimeBattlesMmre || 0,
+                  lastBattleMmreAt: activeSeason?.lastBattleMmreAt || null,
                   season: activeSeason?.season ? {
                     id: activeSeason.season.id,
                     name: activeSeason.season.name,
@@ -336,6 +365,15 @@ export const guildsRouter = router({
                   losses: gs.losses,
                   winRate: gs.totalBattles > 0 ? (gs.wins / gs.totalBattles * 100).toFixed(1) : '0.0',
                   avgMass: Math.round(avgMass * 10) / 10,
+                  // MMR-eligible battle statistics
+                  totalBattlesMmre: gs.totalBattlesMmre,
+                  winsMmre: gs.winsMmre,
+                  lossesMmre: gs.lossesMmre,
+                  winRateMmre: gs.totalBattlesMmre > 0 ? (gs.winsMmre / gs.totalBattlesMmre * 100).toFixed(1) : '0.0',
+                  totalFameGainedMmre: gs.totalFameGainedMmre,
+                  totalFameLostMmre: gs.totalFameLostMmre,
+                  primeTimeBattlesMmre: gs.primeTimeBattlesMmre,
+                  lastBattleMmreAt: gs.lastBattleMmreAt,
                   season: {
                     id: gs.season.id,
                     name: gs.season.name,
@@ -453,6 +491,15 @@ export const guildsRouter = router({
                   losses: gs.losses,
                   winRate: gs.totalBattles > 0 ? (gs.wins / gs.totalBattles * 100).toFixed(1) : '0.0',
                   avgMass: Math.round(avgMass * 10) / 10,
+                  // MMR-eligible battle statistics
+                  totalBattlesMmre: gs.totalBattlesMmre,
+                  winsMmre: gs.winsMmre,
+                  lossesMmre: gs.lossesMmre,
+                  winRateMmre: gs.totalBattlesMmre > 0 ? (gs.winsMmre / gs.totalBattlesMmre * 100).toFixed(1) : '0.0',
+                  totalFameGainedMmre: gs.totalFameGainedMmre,
+                  totalFameLostMmre: gs.totalFameLostMmre,
+                  primeTimeBattlesMmre: gs.primeTimeBattlesMmre,
+                  lastBattleMmreAt: gs.lastBattleMmreAt,
                   season: {
                     id: gs.season.id,
                     name: gs.season.name,
@@ -565,6 +612,15 @@ export const guildsRouter = router({
                   losses: gs.losses,
                   winRate: gs.totalBattles > 0 ? (gs.wins / gs.totalBattles * 100).toFixed(1) : '0.0',
                   avgMass: Math.round(avgMass * 10) / 10,
+                  // MMR-eligible battle statistics
+                  totalBattlesMmre: gs.totalBattlesMmre,
+                  winsMmre: gs.winsMmre,
+                  lossesMmre: gs.lossesMmre,
+                  winRateMmre: gs.totalBattlesMmre > 0 ? (gs.winsMmre / gs.totalBattlesMmre * 100).toFixed(1) : '0.0',
+                  totalFameGainedMmre: gs.totalFameGainedMmre,
+                  totalFameLostMmre: gs.totalFameLostMmre,
+                  primeTimeBattlesMmre: gs.primeTimeBattlesMmre,
+                  lastBattleMmreAt: gs.lastBattleMmreAt,
                   season: {
                     id: gs.season.id,
                     name: gs.season.name,

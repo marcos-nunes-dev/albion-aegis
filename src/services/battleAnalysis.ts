@@ -690,11 +690,21 @@ export class BattleAnalysisService {
     const guildAlliances = new Map<string, string>();
 
     try {
+      logger.debug('Extracting guild alliances', {
+        battleDataKeys: Object.keys(battleData || {}),
+        killsDataLength: killsData?.length || 0,
+        hasGuilds: !!(battleData?.guilds),
+        hasGuildsJson: !!(battleData?.guildsJson),
+        hasPlayers: !!(battleData?.players)
+      });
+
       // First try to get alliances from battle data guilds (API response format)
       if (battleData.guilds && Array.isArray(battleData.guilds)) {
+        logger.debug('Processing battleData.guilds', { guildsCount: battleData.guilds.length });
         for (const guild of battleData.guilds) {
           if (guild.name && guild.alliance) {
             guildAlliances.set(guild.name, guild.alliance);
+            logger.debug('Found alliance from battleData.guilds', { guildName: guild.name, alliance: guild.alliance });
           }
         }
       }
@@ -702,10 +712,15 @@ export class BattleAnalysisService {
       // Then try to get alliances from guildsJson
       if (battleData.guildsJson && typeof battleData.guildsJson === 'object') {
         const guildsJson = battleData.guildsJson;
+        logger.debug('Processing battleData.guildsJson', { 
+          isArray: Array.isArray(guildsJson),
+          keys: Array.isArray(guildsJson) ? guildsJson.length : Object.keys(guildsJson).length
+        });
         if (Array.isArray(guildsJson)) {
           for (const guild of guildsJson) {
             if (guild.name && guild.alliance) {
               guildAlliances.set(guild.name, guild.alliance);
+              logger.debug('Found alliance from guildsJson array', { guildName: guild.name, alliance: guild.alliance });
             }
           }
         } else {
@@ -715,6 +730,7 @@ export class BattleAnalysisService {
             const alliance = (guildInfo as any).alliance || (guildInfo as any).Alliance;
             if (guildName && alliance) {
               guildAlliances.set(guildName, alliance);
+              logger.debug('Found alliance from guildsJson object', { guildName, alliance });
             }
           }
         }
@@ -722,31 +738,43 @@ export class BattleAnalysisService {
 
       // Also extract alliances from players array (API response format)
       if (battleData.players && Array.isArray(battleData.players)) {
+        logger.debug('Processing battleData.players', { playersCount: battleData.players.length });
         for (const player of battleData.players) {
           if (player.guildName && player.allianceName) {
             guildAlliances.set(player.guildName, player.allianceName);
+            logger.debug('Found alliance from players', { guildName: player.guildName, alliance: player.allianceName });
           }
         }
       }
 
       // Finally, extract from kills data as fallback
+      logger.debug('Processing kills data for alliances', { killsCount: killsData.length });
       for (const kill of killsData) {
         // Try processed database format first
         if (kill.killerGuild && kill.killerAlliance) {
           guildAlliances.set(kill.killerGuild, kill.killerAlliance);
+          logger.debug('Found alliance from kill (processed)', { guildName: kill.killerGuild, alliance: kill.killerAlliance });
         }
         if (kill.victimGuild && kill.victimAlliance) {
           guildAlliances.set(kill.victimGuild, kill.victimAlliance);
+          logger.debug('Found alliance from kill (processed)', { guildName: kill.victimGuild, alliance: kill.victimAlliance });
         }
         
         // Try raw API response format
         if (kill.Killer?.GuildName && kill.Killer?.AllianceName) {
           guildAlliances.set(kill.Killer.GuildName, kill.Killer.AllianceName);
+          logger.debug('Found alliance from kill (raw)', { guildName: kill.Killer.GuildName, alliance: kill.Killer.AllianceName });
         }
         if (kill.Victim?.GuildName && kill.Victim?.AllianceName) {
           guildAlliances.set(kill.Victim.GuildName, kill.Victim.AllianceName);
+          logger.debug('Found alliance from kill (raw)', { guildName: kill.Victim.GuildName, alliance: kill.Victim.AllianceName });
         }
       }
+
+      logger.info('Guild alliances extraction completed', {
+        totalAlliancesFound: guildAlliances.size,
+        alliances: Array.from(guildAlliances.entries())
+      });
 
       return guildAlliances;
 
