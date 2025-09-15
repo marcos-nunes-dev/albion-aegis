@@ -703,8 +703,6 @@ export class MmrService {
           .reduce((sum, g) => sum + g.players, 0);
         
         if (opponentPlayers > 0) {
-          const allianceRatio = alliancePlayers / opponentPlayers;
-          
           // FIXED: Apply underdog bonuses and advantage penalties based on alliance totals
           // Compare relative to the largest alliance, not just opponent alliance
           const maxAlliancePlayers = Math.max(alliancePlayers, opponentPlayers);
@@ -886,69 +884,7 @@ export class MmrService {
     return Math.max(-1, Math.min(1, factor));
   }
 
-  /**
-   * Apply MMR decay for inactive guilds to prevent infinite scaling
-   * Guilds that don't fight for extended periods lose MMR gradually
-   */
-  private async applyMmrDecay(guildStat: GuildBattleStats): Promise<number> {
-    try {
-      const currentSeason = await this.getCurrentActiveSeason();
-      if (!currentSeason) return guildStat.currentMmr;
-
-      // Get the last battle for this guild in this season
-      const lastBattle = await this.prisma.mmrCalculationLog.findFirst({
-        where: {
-          guildId: guildStat.guildId,
-          seasonId: currentSeason.id
-        },
-        orderBy: {
-          processedAt: 'desc'
-        },
-        select: {
-          processedAt: true
-        }
-      });
-
-      if (!lastBattle) return guildStat.currentMmr; // No previous battles, no decay
-
-      // Calculate days since last battle
-      const daysSinceLastBattle = Math.floor(
-        (Date.now() - lastBattle.processedAt.getTime()) / (1000 * 60 * 60 * 24)
-      );
-
-      if (daysSinceLastBattle < MMR_CONSTANTS.MMR_DECAY_THRESHOLD) {
-        return guildStat.currentMmr; // No decay yet
-      }
-
-      // Apply decay: lose 1% MMR per day of inactivity
-      const decayDays = daysSinceLastBattle - MMR_CONSTANTS.MMR_DECAY_THRESHOLD;
-      const decayFactor = Math.pow(1 - MMR_CONSTANTS.MMR_DECAY_RATE, decayDays);
-      
-      // Only apply decay to MMR above baseline
-      const baselineMmr = MMR_CONSTANTS.BASE_MMR;
-      const mmrAboveBaseline = Math.max(0, guildStat.currentMmr - baselineMmr);
-      const decayedMmrAboveBaseline = mmrAboveBaseline * decayFactor;
-      
-      const newMmr = baselineMmr + decayedMmrAboveBaseline;
-
-      logger.debug('Applied MMR decay', {
-        guildId: guildStat.guildId,
-        guildName: guildStat.guildName,
-        daysSinceLastBattle,
-        originalMmr: guildStat.currentMmr,
-        newMmr,
-        decayFactor
-      });
-
-      return newMmr;
-    } catch (error) {
-      logger.error('Error applying MMR decay', {
-        guildId: guildStat.guildId,
-        error: error instanceof Error ? error.message : 'Unknown error'
-      });
-      return guildStat.currentMmr; // No decay on error
-    }
-  }
+  // MMR decay method removed - will be integrated in future update
 
   /**
    * Calculate dynamic K-factor based on current MMR to prevent infinite scaling
