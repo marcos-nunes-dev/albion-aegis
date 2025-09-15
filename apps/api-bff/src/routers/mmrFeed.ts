@@ -103,8 +103,6 @@ export const mmrFeedRouter = router({
               orderBy: { processedAt: 'desc' }
             });
 
-            const totalBattles = uniqueBattles.length;
-            
             // Apply pagination to unique battles
             const paginatedBattles = uniqueBattles.slice(
               (page - 1) * pageSize, 
@@ -175,7 +173,7 @@ export const mmrFeedRouter = router({
               data: feedData,
               page,
               pageSize,
-              total,
+              total: uniqueBattles.length,
               totalBattles: feedData.length
             };
           },
