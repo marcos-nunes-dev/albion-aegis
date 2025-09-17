@@ -1083,6 +1083,7 @@ export class MmrService {
 
   /**
    * Update guild season MMR in database with detailed logging
+   * Note: This function is only called for battles that have already passed MMR eligibility checks
    */
   async updateGuildSeasonMmr(
     guildId: string,
@@ -1129,11 +1130,9 @@ export class MmrService {
       const isWin =
         this.calculateWinLossFactor(battleStats, battleAnalysis) > 0;
 
-      // Check if this battle is MMR-eligible
-      const isMmreBattle = MmrService.shouldCalculateMmr(
-        battleAnalysis.totalPlayers,
-        battleAnalysis.totalFame
-      );
+      // This function is only called for MMR-eligible battles
+      // so we can always increment the MMRE statistics
+      const isMmreBattle = true;
 
       // Update guild season
       await this.prisma.guildSeason.update({
