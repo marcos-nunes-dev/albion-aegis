@@ -58,6 +58,18 @@ class DailyGapRecoveryService {
         brazilianTime
       });
 
+      // Log final summary
+      if (recoveredCount > 0) {
+        console.log('\n🎉 DAILY GAP RECOVERY COMPLETED SUCCESSFULLY!');
+        console.log(`✅ Total battles recovered: ${recoveredCount}`);
+        console.log(`⏱️  Processing time: ${duration}ms`);
+        console.log('📋 Check the logs above for detailed list of recovered battles');
+      } else {
+        console.log('\n✅ DAILY GAP RECOVERY COMPLETED - NO MISSING BATTLES FOUND!');
+        console.log('🎯 Your database is up to date with the Albion API');
+        console.log(`⏱️  Processing time: ${duration}ms`);
+      }
+
     } catch (error) {
       const duration = Date.now() - startTime;
       logger.error('Daily battle gap recovery failed', {
@@ -93,6 +105,15 @@ class DailyGapRecoveryService {
     const maxPagesToCheck = 200; // Check up to 200 pages (10,000 battles) to be thorough
     const maxAgeHours = 48; // Stop when battles are older than 48 hours
     const currentTime = new Date();
+    const recoveredBattles: Array<{
+      albionId: string;
+      startedAt: string;
+      totalPlayers: number;
+      totalFame: number;
+      hoursAgo: number;
+      page: number;
+      hadMmrJob: boolean;
+    }> = [];
     
     logger.info('Starting comprehensive battle gap recovery', {
       maxPagesToCheck,
@@ -192,6 +213,18 @@ class DailyGapRecoveryService {
             const recovered = await this.recoverBattle(battle);
             if (recovered) {
               totalRecovered++;
+              
+              // Track this recovered battle for the summary
+              recoveredBattles.push({
+                albionId: battle.albionId.toString(),
+                startedAt: battle.startedAt,
+                totalPlayers: battle.totalPlayers,
+                totalFame: battle.totalFame,
+                hoursAgo: Math.round(battleHoursAgo),
+                page: page + 1,
+                hadMmrJob: mmrJobExists
+              });
+              
               logger.info('Recovered missing battle', {
                 albionId: battle.albionId.toString(),
                 startedAt: battle.startedAt,
@@ -229,6 +262,43 @@ class DailyGapRecoveryService {
       battlesRecovered: totalRecovered,
       note: 'MMR duplicate processing prevention is active'
     });
+
+    // Log detailed summary of recovered battles
+    if (recoveredBattles.length > 0) {
+      logger.info('=== RECOVERED BATTLES SUMMARY ===');
+      logger.info(`Total battles recovered: ${recoveredBattles.length}`);
+      logger.info('');
+      
+      // Sort by hours ago (most recent first)
+      const sortedBattles = recoveredBattles.sort((a, b) => a.hoursAgo - b.hoursAgo);
+      
+      logger.info('Recovered battles details:');
+      sortedBattles.forEach((battle, index) => {
+        logger.info(`${index + 1}. Battle ${battle.albionId}:`);
+        logger.info(`   - Started: ${battle.startedAt} (${battle.hoursAgo}h ago)`);
+        logger.info(`   - Players: ${battle.totalPlayers}, Fame: ${battle.totalFame.toLocaleString()}`);
+        logger.info(`   - Found on page: ${battle.page}`);
+        logger.info(`   - Had existing MMR job: ${battle.hadMmrJob ? 'YES (skip MMR processing)' : 'NO (will process MMR)'}`);
+        logger.info('');
+      });
+      
+      // Summary statistics
+      const newMmrProcessing = recoveredBattles.filter(b => !b.hadMmrJob).length;
+      const skippedMmrProcessing = recoveredBattles.filter(b => b.hadMmrJob).length;
+      const totalPlayers = recoveredBattles.reduce((sum, b) => sum + b.totalPlayers, 0);
+      const totalFame = recoveredBattles.reduce((sum, b) => sum + b.totalFame, 0);
+      const avgHoursAgo = Math.round(recoveredBattles.reduce((sum, b) => sum + b.hoursAgo, 0) / recoveredBattles.length);
+      
+      logger.info('Recovery Statistics:');
+      logger.info(`- Battles triggering NEW MMR processing: ${newMmrProcessing}`);
+      logger.info(`- Battles SKIPPING MMR processing (already done): ${skippedMmrProcessing}`);
+      logger.info(`- Total players in recovered battles: ${totalPlayers.toLocaleString()}`);
+      logger.info(`- Total fame in recovered battles: ${totalFame.toLocaleString()}`);
+      logger.info(`- Average age of recovered battles: ${avgHoursAgo} hours`);
+      logger.info('=== END RECOVERED BATTLES SUMMARY ===');
+    } else {
+      logger.info('✅ No missing battles found - database is up to date!');
+    }
 
     return totalRecovered;
   }

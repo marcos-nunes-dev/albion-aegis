@@ -1094,6 +1094,20 @@ export class MmrService {
     antiFarmingFactor?: number
   ): Promise<void> {
     try {
+      // Check if this battle has already been processed for this guild to prevent duplicate updates
+      const existingLog = await this.prisma.mmrCalculationLog.findFirst({
+        where: {
+          battleId: battleAnalysis.battleId,
+          seasonId: seasonId,
+          guildId: guildId
+        }
+      });
+
+      if (existingLog) {
+        console.log(`⚠️ Battle ${battleAnalysis.battleId} already processed for guild ${guildId}, skipping duplicate update`);
+        return;
+      }
+
       // Get or create guild season record
       let guildSeason = await this.prisma.guildSeason.findUnique({
         where: { guildId_seasonId: { guildId, seasonId } },
