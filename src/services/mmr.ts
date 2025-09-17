@@ -1197,14 +1197,17 @@ export class MmrService {
             lastBattleMmreAt: isMmreBattle ? new Date() : guildSeason.lastBattleMmreAt,
           },
         });
-      });
 
-      // Update prime time mass for eligible guilds (function will determine if it's actually prime time)
-      await this.updatePrimeTimeMass(
-        guildSeason.id,
-        battleStats.players,
-        battleAnalysis.battleId
-      );
+        // Update prime time mass for MMR-eligible prime time battles
+        if (battleStats.isPrimeTime) {
+          await this.updatePrimeTimeMassInTransaction(
+            tx,
+            guildSeason.id,
+            battleStats.players,
+            battleAnalysis.battleId
+          );
+        }
+      });
 
       logger.info("Updated guild season MMR", {
         guildId,
@@ -1228,21 +1231,23 @@ export class MmrService {
   }
 
   /**
-   * Update prime time mass for a guild
+   * Update prime time mass for a guild within a transaction (NEW - more reliable)
    */
-  private async updatePrimeTimeMass(
+  private async updatePrimeTimeMassInTransaction(
+    tx: Parameters<Parameters<typeof this.prisma.$transaction>[0]>[0],
     guildSeasonId: string,
     playerCount: number,
     battleId: bigint
   ): Promise<void> {
     try {
-      logger.debug('Updating prime time mass for battle', {
+      logger.debug('Updating prime time mass within transaction', {
         battleId: battleId.toString(),
-        playerCount
+        playerCount,
+        guildSeasonId
       });
 
       // Get the battle to determine which prime time window it falls into
-      const battle = await this.prisma.battle.findUnique({
+      const battle = await tx.battle.findUnique({
         where: { albionId: battleId },
       });
 
@@ -1254,7 +1259,7 @@ export class MmrService {
       }
 
       // Get global prime time windows
-      const primeTimeWindows = await this.prisma.primeTimeWindow.findMany();
+      const primeTimeWindows = await tx.primeTimeWindow.findMany();
       logger.debug('Found prime time windows', {
         battleId: battleId.toString(),
         windowCount: primeTimeWindows.length
@@ -1294,75 +1299,75 @@ export class MmrService {
         windowEnd: matchingWindow.endHour
       });
 
-      // Get or create prime time mass record
-      let primeTimeMass = await this.prisma.guildPrimeTimeMass.findUnique({
+      // Use upsert for atomic operation - prevents race conditions
+      await tx.guildPrimeTimeMass.upsert({
         where: { 
           guildSeasonId_primeTimeWindowId: { 
             guildSeasonId, 
             primeTimeWindowId: matchingWindow.id 
           } 
-        }
-      });
-
-      if (!primeTimeMass) {
-        // Create new record
-        primeTimeMass = await this.prisma.guildPrimeTimeMass.create({
-          data: {
-            guildSeasonId,
-            primeTimeWindowId: matchingWindow.id,
-            avgMass: playerCount,
-            battleCount: 1,
-            lastBattleAt: battle.startedAt
-          }
-        });
-
-        logger.debug('Created new prime time mass record', {
+        },
+        create: {
           guildSeasonId,
           primeTimeWindowId: matchingWindow.id,
           avgMass: playerCount,
-          battleCount: 1
-        });
-      } else {
-        // Update existing record with running average
-        const newBattleCount = primeTimeMass.battleCount + 1;
-        const newAvgMass = ((primeTimeMass.avgMass * primeTimeMass.battleCount) + playerCount) / newBattleCount;
+          battleCount: 1,
+          lastBattleAt: battle.startedAt
+        },
+        update: {
+          avgMass: await this.calculateNewAvgMass(tx, guildSeasonId, matchingWindow.id, playerCount),
+          battleCount: {
+            increment: 1
+          },
+          lastBattleAt: battle.startedAt
+        }
+      });
 
-        await this.prisma.guildPrimeTimeMass.update({
-          where: { id: primeTimeMass.id },
-          data: {
-            avgMass: newAvgMass,
-            battleCount: newBattleCount,
-            lastBattleAt: battle.startedAt
-          }
-        });
-
-        logger.debug('Updated existing prime time mass record', {
-          guildSeasonId,
-          primeTimeWindowId: matchingWindow.id,
-          oldAvgMass: primeTimeMass.avgMass,
-          newAvgMass: newAvgMass,
-          oldBattleCount: primeTimeMass.battleCount,
-          newBattleCount: newBattleCount
-        });
-      }
-
-      logger.debug("Successfully updated prime time mass", {
+      logger.debug("Successfully updated prime time mass in transaction", {
         guildSeasonId,
         primeTimeWindow: `${matchingWindow.startHour}:00-${matchingWindow.endHour}:00`,
         playerCount,
-        battleId: battleId.toString(),
-        finalAvgMass: primeTimeMass.avgMass,
-        finalBattleCount: primeTimeMass.battleCount
+        battleId: battleId.toString()
       });
     } catch (error) {
-      logger.error("Error updating prime time mass", {
+      logger.error("CRITICAL: Error updating prime time mass in transaction", {
         guildSeasonId,
         playerCount,
         battleId: battleId.toString(),
         error: error instanceof Error ? error.message : "Unknown error",
+        stack: error instanceof Error ? error.stack : undefined
       });
+      // Re-throw to cause transaction rollback
+      throw error;
     }
   }
+
+  /**
+   * Helper function to calculate new average mass
+   */
+  private async calculateNewAvgMass(
+    tx: Parameters<Parameters<typeof this.prisma.$transaction>[0]>[0],
+    guildSeasonId: string,
+    primeTimeWindowId: string,
+    newPlayerCount: number
+  ): Promise<number> {
+    const existing = await tx.guildPrimeTimeMass.findUnique({
+      where: { 
+        guildSeasonId_primeTimeWindowId: { 
+          guildSeasonId, 
+          primeTimeWindowId 
+        } 
+      }
+    });
+
+    if (!existing) {
+      return newPlayerCount;
+    }
+
+    const newBattleCount = existing.battleCount + 1;
+    return ((existing.avgMass * existing.battleCount) + newPlayerCount) / newBattleCount;
+  }
+
 
   /**
    * Get prime time mass data for a guild season

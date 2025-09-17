@@ -117,10 +117,11 @@ export const guildsRouter = router({
                       rank = betterCount + 1;
                     }
 
-                    // Calculate average mass across prime time windows where guild actually participated
+                    // Calculate weighted average mass across prime time windows where guild actually participated
                     const participatedWindows = gs.primeTimeMasses.filter(mass => mass.battleCount > 0);
                     const avgMass = participatedWindows.length > 0 
-                      ? participatedWindows.reduce((sum, mass) => sum + mass.avgMass, 0) / participatedWindows.length
+                      ? participatedWindows.reduce((sum, mass) => sum + (mass.avgMass * mass.battleCount), 0) / 
+                        participatedWindows.reduce((sum, mass) => sum + mass.battleCount, 0)
                       : 0;
 
                     return {
@@ -190,10 +191,11 @@ export const guildsRouter = router({
                 ]);
 
                 const data = guildSeasons.map((gs) => {
-                  // Calculate average mass across prime time windows where guild actually participated
+                  // Calculate weighted average mass across prime time windows where guild actually participated
                   const participatedWindows = gs.primeTimeMasses.filter(mass => mass.battleCount > 0);
                   const avgMass = participatedWindows.length > 0 
-                    ? participatedWindows.reduce((sum, mass) => sum + mass.avgMass, 0) / participatedWindows.length
+                    ? participatedWindows.reduce((sum, mass) => sum + (mass.avgMass * mass.battleCount), 0) / 
+                      participatedWindows.reduce((sum, mass) => sum + mass.battleCount, 0)
                     : 0;
 
                   return {
@@ -759,6 +761,19 @@ export const guildsRouter = router({
                 }
               } catch (error) {
                 console.warn('Error counting MMR battles for prime time window:', error);
+              }
+
+              // DEBUGGING: Log data inconsistency
+              if (mmrBattleCount > 0 && (!massData || massData.avgMass === 0)) {
+                console.warn('Data inconsistency detected:', {
+                  guildId,
+                  windowId: window.id,
+                  timeWindow: `${window.startHour}:00-${window.endHour}:00`,
+                  mmrBattleCount,
+                  massDataExists: !!massData,
+                  massDataAvgMass: massData?.avgMass,
+                  massDataBattleCount: massData?.battleCount
+                });
               }
 
               return {
