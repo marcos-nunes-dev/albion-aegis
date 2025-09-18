@@ -493,7 +493,8 @@ export const battlesRouter = router({
             avgIP: log.avgIP,
             hasSignificantParticipation: log.hasSignificantParticipation,
             antiFarmingFactor: log.antiFarmingFactor,
-            originalMmrChange: log.originalMmrChange
+            originalMmrChange: log.originalMmrChange,
+            allianceName: log.allianceName
           });
         });
 
