@@ -718,19 +718,6 @@ export const guildsRouter = router({
               // Use the repaired data from guildprimetimemass table instead of recalculating
               // This ensures consistency with the repair script
 
-              // DEBUGGING: Log data inconsistency
-              if (mmrBattleCount > 0 && (!massData || massData.avgMass === 0)) {
-                console.warn('Data inconsistency detected:', {
-                  guildId,
-                  windowId: window.id,
-                  timeWindow: `${window.startHour}:00-${window.endHour}:00`,
-                  mmrBattleCount,
-                  massDataExists: !!massData,
-                  massDataAvgMass: massData?.avgMass,
-                  massDataBattleCount: massData?.battleCount
-                });
-              }
-
               return {
                 windowId: window.id,
                 startHour: window.startHour,
