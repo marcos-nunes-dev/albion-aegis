@@ -402,21 +402,7 @@ export const battlesRouter = router({
             processedAt: {
               gte: season.startDate,
               lte: season.endDate || new Date()
-            },
-            // Filter by hour of day for prime time
-            ...(endHour < startHour ? {
-              // Overnight window (e.g., 22:00 to 02:00)
-              OR: [
-                {
-                  processedAt: {
-                    gte: season.startDate,
-                    lte: season.endDate || new Date()
-                  }
-                }
-              ]
-            } : {
-              // Same day window - we'll filter by hour in the application logic
-            })
+            }
           },
           include: {
             season: true,
@@ -427,26 +413,51 @@ export const battlesRouter = router({
           take: pageSize * 3 // Get more to account for hour filtering
         });
 
-        // Filter logs by hour of day for prime time
+        // Get battle start times for filtering by actual battle time
+        const battleIds = logs.map(log => log.battleId);
+        const battleRecords = await prisma.battle.findMany({
+          where: {
+            albionId: { in: battleIds }
+          },
+          select: {
+            albionId: true,
+            startedAt: true
+          }
+        });
+
+        const battleTimeMap = new Map<bigint, Date>();
+        battleRecords.forEach(battle => {
+          battleTimeMap.set(battle.albionId, battle.startedAt);
+        });
+
+        // Filter logs by hour of day for prime time using actual battle start time
         const filteredLogs = logs.filter(log => {
-          const logHour = log.processedAt.getUTCHours();
+          const battleStartTime = battleTimeMap.get(log.battleId);
+          if (!battleStartTime) return false;
+          
+          const battleHour = battleStartTime.getUTCHours();
           
           if (endHour < startHour) {
             // Overnight window (e.g., 22:00 to 02:00)
-            return logHour >= startHour || logHour < endHour;
+            return battleHour >= startHour || battleHour < endHour;
           } else {
             // Same day window (e.g., 20:00 to 22:00)
-            return logHour >= startHour && logHour < endHour;
+            return battleHour >= startHour && battleHour < endHour;
           }
         }).slice(0, pageSize); // Limit to page size after filtering
 
         console.log(`🔍 Prime time filtering: ${startHour}:00-${endHour}:00 UTC`);
         console.log(`📊 Found ${logs.length} total logs, ${filteredLogs.length} after hour filtering`);
         if (filteredLogs.length > 0) {
-          console.log(`⏰ Sample log hours:`, filteredLogs.slice(0, 3).map(log => ({
-            hour: log.processedAt.getUTCHours(),
-            date: log.processedAt.toISOString()
-          })));
+          console.log(`⏰ Sample battle hours:`, filteredLogs.slice(0, 3).map(log => {
+            const battleStartTime = battleTimeMap.get(log.battleId);
+            return {
+              battleId: log.battleId.toString(),
+              battleHour: battleStartTime?.getUTCHours(),
+              battleStartTime: battleStartTime?.toISOString(),
+              processedAt: log.processedAt.toISOString()
+            };
+          }));
         }
 
         // Group logs by battle ID to get battle summaries

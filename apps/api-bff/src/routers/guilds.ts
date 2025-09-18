@@ -713,53 +713,8 @@ export const guildsRouter = router({
             const primeTimeData = await Promise.all(allPrimeTimeWindows.map(async (window) => {
               const massData = massMap.get(window.id);
               
-              // Count actual MMR calculation logs for this prime time window
-              let mmrBattleCount = 0;
-              let lastMmrBattleAt = null;
-              
-              try {
-                // Get MMR calculation logs for this prime time window
-                const mmrLogs = await prisma.mmrCalculationLog.findMany({
-                  where: {
-                    guildId,
-                    seasonId: targetSeasonId,
-                    processedAt: {
-                      gte: guildSeason.season.startDate,
-                      lte: guildSeason.season.endDate || new Date()
-                    }
-                  },
-                  select: {
-                    processedAt: true,
-                    battleId: true
-                  }
-                });
-
-                // Filter by hour of day for prime time
-                const filteredLogs = mmrLogs.filter(log => {
-                  const logHour = log.processedAt.getUTCHours();
-                  
-                  if (window.endHour < window.startHour) {
-                    // Overnight window (e.g., 22:00 to 02:00)
-                    return logHour >= window.startHour || logHour < window.endHour;
-                  } else {
-                    // Same day window (e.g., 20:00 to 22:00)
-                    return logHour >= window.startHour && logHour < window.endHour;
-                  }
-                });
-
-                // Count unique battles
-                const uniqueBattles = new Set(filteredLogs.map(log => log.battleId.toString()));
-                mmrBattleCount = uniqueBattles.size;
-                
-                // Get the most recent battle time
-                if (filteredLogs.length > 0) {
-                  lastMmrBattleAt = filteredLogs
-                    .sort((a, b) => b.processedAt.getTime() - a.processedAt.getTime())[0]
-                    .processedAt;
-                }
-              } catch (error) {
-                console.warn('Error counting MMR battles for prime time window:', error);
-              }
+              // Use the repaired data from guildprimetimemass table instead of recalculating
+              // This ensures consistency with the repair script
 
               return {
                 windowId: window.id,
@@ -767,8 +722,8 @@ export const guildsRouter = router({
                 endHour: window.endHour,
                 timezone: window.timezone,
                 avgMass: massData?.avgMass || 0,
-                battleCount: mmrBattleCount, // Use MMR battle count instead
-                lastBattleAt: lastMmrBattleAt || massData?.lastBattleAt
+                battleCount: massData?.battleCount || 0, // Use the repaired data from guildprimetimemass table
+                lastBattleAt: massData?.lastBattleAt
               };
             }));
 

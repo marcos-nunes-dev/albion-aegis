@@ -1,4 +1,5 @@
 import { createServer } from 'http';
+import dotenv from 'dotenv';
 import { seasonsRouter } from "./routers/seasons.js";
 import { guildsRouter } from "./routers/guilds.js";
 import { statisticsRouter } from "./routers/statistics.js";
@@ -7,6 +8,9 @@ import { battlesRouter } from "./routers/battles.js";
 import { createContext } from "./trpcContext.js";
 import { router } from "./trpc.js";
 import redis from '../../../src/queue/connection.js';
+
+// Load environment variables
+dotenv.config();
 
 // Create the main app router
 const appRouter = router({
