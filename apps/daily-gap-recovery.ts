@@ -58,6 +58,18 @@ class DailyGapRecoveryService {
         brazilianTime
       });
 
+      // Log final summary
+      if (recoveredCount > 0) {
+        console.log('\n🎉 DAILY GAP RECOVERY COMPLETED SUCCESSFULLY!');
+        console.log(`✅ Total battles recovered: ${recoveredCount}`);
+        console.log(`⏱️  Processing time: ${duration}ms`);
+        console.log('📋 Check the logs above for detailed list of recovered battles');
+      } else {
+        console.log('\n✅ DAILY GAP RECOVERY COMPLETED - NO MISSING BATTLES FOUND!');
+        console.log('🎯 Your database is up to date with the Albion API');
+        console.log(`⏱️  Processing time: ${duration}ms`);
+      }
+
     } catch (error) {
       const duration = Date.now() - startTime;
       logger.error('Daily battle gap recovery failed', {
@@ -93,6 +105,15 @@ class DailyGapRecoveryService {
     const maxPagesToCheck = 200; // Check up to 200 pages (10,000 battles) to be thorough
     const maxAgeHours = 48; // Stop when battles are older than 48 hours
     const currentTime = new Date();
+    const recoveredBattles: Array<{
+      albionId: string;
+      startedAt: string;
+      totalPlayers: number;
+      totalFame: number;
+      hoursAgo: number;
+      page: number;
+      hadMmrJob: boolean;
+    }> = [];
     
     logger.info('Starting comprehensive battle gap recovery', {
       maxPagesToCheck,
@@ -140,41 +161,90 @@ class DailyGapRecoveryService {
           battleCount: battleIds.length
         });
 
-        const existingBattles = await this.prisma.battle.findMany({
-          where: { 
-            albionId: { 
-              in: battleIds 
-            } 
-          },
-          select: { albionId: true }
-        });
+        // Check for existing battles and existing MMR jobs in parallel
+        const [existingBattles, existingMmrJobs] = await Promise.all([
+          this.prisma.battle.findMany({
+            where: { 
+              albionId: { 
+                in: battleIds 
+              } 
+            },
+            select: { albionId: true }
+          }),
+          this.prisma.mmrCalculationJob.findMany({
+            where: {
+              battleId: {
+                in: battleIds
+              },
+              status: { in: ['COMPLETED', 'PROCESSING'] }
+            },
+            select: { battleId: true }
+          })
+        ]);
 
         const existingBattleIds = new Set(existingBattles.map((b: any) => b.albionId));
+        const existingMmrJobIds = new Set(existingMmrJobs.map((j: any) => j.battleId));
+        
+        logger.debug('Battle existence check results', {
+          page: page + 1,
+          totalBattles: battleIds.length,
+          existingBattles: existingBattleIds.size,
+          existingMmrJobs: existingMmrJobIds.size
+        });
 
         // Check each battle for missing ones
         for (const battle of battles) {
           const battleStartTime = new Date(battle.startedAt);
           const battleHoursAgo = (currentTime.getTime() - battleStartTime.getTime()) / (1000 * 60 * 60);
           
-          if (!existingBattleIds.has(battle.albionId)) {
+          const battleExists = existingBattleIds.has(battle.albionId);
+          const mmrJobExists = existingMmrJobIds.has(battle.albionId);
+          
+          if (!battleExists) {
             // This is a missing battle! Recover it
             logger.info('Found missing battle on API', {
               albionId: battle.albionId.toString(),
               startedAt: battle.startedAt,
               page: page + 1,
-              hoursAgo: Math.round(battleHoursAgo)
+              hoursAgo: Math.round(battleHoursAgo),
+              mmrJobExists
             });
             
             const recovered = await this.recoverBattle(battle);
             if (recovered) {
               totalRecovered++;
+              
+              // Track this recovered battle for the summary
+              recoveredBattles.push({
+                albionId: battle.albionId.toString(),
+                startedAt: battle.startedAt,
+                totalPlayers: battle.totalPlayers,
+                totalFame: battle.totalFame,
+                hoursAgo: Math.round(battleHoursAgo),
+                page: page + 1,
+                hadMmrJob: mmrJobExists
+              });
+              
               logger.info('Recovered missing battle', {
                 albionId: battle.albionId.toString(),
                 startedAt: battle.startedAt,
                 page: page + 1,
-                hoursAgo: Math.round(battleHoursAgo)
+                hoursAgo: Math.round(battleHoursAgo),
+                mmrJobExists
               });
             }
+          } else if (mmrJobExists) {
+            logger.debug('Battle exists and MMR already processed, skipping', {
+              albionId: battle.albionId.toString(),
+              page: page + 1,
+              hoursAgo: Math.round(battleHoursAgo)
+            });
+          } else {
+            logger.debug('Battle exists but no MMR processing detected', {
+              albionId: battle.albionId.toString(),
+              page: page + 1,
+              hoursAgo: Math.round(battleHoursAgo)
+            });
           }
         }
 
@@ -189,8 +259,46 @@ class DailyGapRecoveryService {
 
     logger.info('Comprehensive missing battle detection completed', {
       pagesChecked: maxPagesToCheck,
-      battlesRecovered: totalRecovered
+      battlesRecovered: totalRecovered,
+      note: 'MMR duplicate processing prevention is active'
     });
+
+    // Log detailed summary of recovered battles
+    if (recoveredBattles.length > 0) {
+      logger.info('=== RECOVERED BATTLES SUMMARY ===');
+      logger.info(`Total battles recovered: ${recoveredBattles.length}`);
+      logger.info('');
+      
+      // Sort by hours ago (most recent first)
+      const sortedBattles = recoveredBattles.sort((a, b) => a.hoursAgo - b.hoursAgo);
+      
+      logger.info('Recovered battles details:');
+      sortedBattles.forEach((battle, index) => {
+        logger.info(`${index + 1}. Battle ${battle.albionId}:`);
+        logger.info(`   - Started: ${battle.startedAt} (${battle.hoursAgo}h ago)`);
+        logger.info(`   - Players: ${battle.totalPlayers}, Fame: ${battle.totalFame.toLocaleString()}`);
+        logger.info(`   - Found on page: ${battle.page}`);
+        logger.info(`   - Had existing MMR job: ${battle.hadMmrJob ? 'YES (skip MMR processing)' : 'NO (will process MMR)'}`);
+        logger.info('');
+      });
+      
+      // Summary statistics
+      const newMmrProcessing = recoveredBattles.filter(b => !b.hadMmrJob).length;
+      const skippedMmrProcessing = recoveredBattles.filter(b => b.hadMmrJob).length;
+      const totalPlayers = recoveredBattles.reduce((sum, b) => sum + b.totalPlayers, 0);
+      const totalFame = recoveredBattles.reduce((sum, b) => sum + b.totalFame, 0);
+      const avgHoursAgo = Math.round(recoveredBattles.reduce((sum, b) => sum + b.hoursAgo, 0) / recoveredBattles.length);
+      
+      logger.info('Recovery Statistics:');
+      logger.info(`- Battles triggering NEW MMR processing: ${newMmrProcessing}`);
+      logger.info(`- Battles SKIPPING MMR processing (already done): ${skippedMmrProcessing}`);
+      logger.info(`- Total players in recovered battles: ${totalPlayers.toLocaleString()}`);
+      logger.info(`- Total fame in recovered battles: ${totalFame.toLocaleString()}`);
+      logger.info(`- Average age of recovered battles: ${avgHoursAgo} hours`);
+      logger.info('=== END RECOVERED BATTLES SUMMARY ===');
+    } else {
+      logger.info('✅ No missing battles found - database is up to date!');
+    }
 
     return totalRecovered;
   }
@@ -214,17 +322,52 @@ class DailyGapRecoveryService {
         this.battleNotifierProducer = new BattleNotifierProducer();
       }
 
+      // Check if this battle has already been processed for MMR to prevent duplicate processing
+      const existingMmrJob = await this.prisma.mmrCalculationJob.findFirst({
+        where: { 
+          battleId: battle.albionId,
+          status: { in: ['COMPLETED', 'PROCESSING'] }
+        }
+      });
+
+      if (existingMmrJob) {
+        logger.info('Battle already processed for MMR, skipping MMR-related jobs', {
+          albionId: battle.albionId.toString(),
+          mmrJobStatus: existingMmrJob.status
+        });
+        
+        // Still upsert the battle data in case it's missing, but don't trigger MMR processing
+        const upsertResult = await this.upsertBattle(battle);
+        
+        // Only enqueue notification job (not kills job which triggers MMR processing)
+        if (upsertResult.wasCreated) {
+          try {
+            await this.battleNotifierProducer.enqueueBattleNotification(battle.albionId);
+            logger.info('Enqueued notification job for recovered battle (MMR already processed)', {
+              albionId: battle.albionId.toString()
+            });
+          } catch (error) {
+            logger.warn('Failed to enqueue battle notification for recovered battle', {
+              albionId: battle.albionId.toString(),
+              error: error instanceof Error ? error.message : 'Unknown error'
+            });
+          }
+        }
+        
+        return upsertResult.wasCreated;
+      }
+
       // Upsert battle to database (reuse existing logic)
       const upsertResult = await this.upsertBattle(battle);
       
       if (upsertResult.wasCreated) {
-        // Enqueue kill fetch job
+        // Enqueue kill fetch job (which will trigger MMR processing)
         await this.enqueueKillsJob(battle.albionId);
         
         // Enqueue battle notification job
         try {
           await this.battleNotifierProducer.enqueueBattleNotification(battle.albionId);
-          logger.info('Enqueued notification job for recovered battle', {
+          logger.info('Enqueued notification and kills jobs for new recovered battle', {
             albionId: battle.albionId.toString()
           });
         } catch (error) {
