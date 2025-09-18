@@ -393,9 +393,8 @@ export const battlesRouter = router({
           throw new Error('Season not found');
         }
 
-        // Get MMR calculation logs for battles during prime time hours throughout the season
-        // We need to filter by hour of day, not specific dates
-        const logs = await prisma.mmrCalculationLog.findMany({
+        // Step 1: Get MMR calculation logs for the specific guild during prime time
+        const guildLogs = await prisma.mmrCalculationLog.findMany({
           where: {
             guildId,
             seasonId: targetSeasonId,
@@ -413,8 +412,8 @@ export const battlesRouter = router({
           take: pageSize * 3 // Get more to account for hour filtering
         });
 
-        // Get battle start times for filtering by actual battle time
-        const battleIds = logs.map(log => log.battleId);
+        // Step 2: Get battle start times for filtering by actual battle time
+        const battleIds = guildLogs.map(log => log.battleId);
         const battleRecords = await prisma.battle.findMany({
           where: {
             albionId: { in: battleIds }
@@ -430,8 +429,8 @@ export const battlesRouter = router({
           battleTimeMap.set(battle.albionId, battle.startedAt);
         });
 
-        // Filter logs by hour of day for prime time using actual battle start time
-        const filteredLogs = logs.filter(log => {
+        // Step 3: Filter guild logs by hour of day for prime time using actual battle start time
+        const filteredGuildLogs = guildLogs.filter(log => {
           const battleStartTime = battleTimeMap.get(log.battleId);
           if (!battleStartTime) return false;
           
@@ -446,10 +445,27 @@ export const battlesRouter = router({
           }
         }).slice(0, pageSize); // Limit to page size after filtering
 
+        // Step 4: Get ALL guild logs for the same battles (not just the selected guild)
+        const primeTimeBattleIds = filteredGuildLogs.map(log => log.battleId);
+        const allGuildLogsForBattles = await prisma.mmrCalculationLog.findMany({
+          where: {
+            battleId: { in: primeTimeBattleIds },
+            seasonId: targetSeasonId,
+            hasSignificantParticipation: true
+          },
+          include: {
+            season: true,
+            guild: true
+          },
+          orderBy: { processedAt: 'desc' }
+        });
+
         console.log(`🔍 Prime time filtering: ${startHour}:00-${endHour}:00 UTC`);
-        console.log(`📊 Found ${logs.length} total logs, ${filteredLogs.length} after hour filtering`);
-        if (filteredLogs.length > 0) {
-          console.log(`⏰ Sample battle hours:`, filteredLogs.slice(0, 3).map(log => {
+        console.log(`📊 Found ${guildLogs.length} guild logs, ${filteredGuildLogs.length} after hour filtering`);
+        console.log(`🏰 Found ${allGuildLogsForBattles.length} total guild logs for ${primeTimeBattleIds.length} battles`);
+        
+        if (filteredGuildLogs.length > 0) {
+          console.log(`⏰ Sample battle hours:`, filteredGuildLogs.slice(0, 3).map(log => {
             const battleStartTime = battleTimeMap.get(log.battleId);
             return {
               battleId: log.battleId.toString(),
@@ -460,9 +476,9 @@ export const battlesRouter = router({
           }));
         }
 
-        // Group logs by battle ID to get battle summaries
+        // Group ALL guild logs by battle ID to get complete battle summaries
         const battleMap = new Map();
-        filteredLogs.forEach(log => {
+        allGuildLogsForBattles.forEach(log => {
           if (!battleMap.has(log.battleId)) {
             battleMap.set(log.battleId, {
               battleId: log.battleId.toString(),
